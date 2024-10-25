@@ -1,5 +1,8 @@
-// WIP
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use super::no_std_floats::NoStdFloatExt;
 
+// WIP
 struct V128([u8; 16]);
 
 impl V128 {
