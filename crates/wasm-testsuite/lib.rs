@@ -23,7 +23,7 @@ struct CustomTests;
 /// 
 /// Includes all proposals from <https://github.com/WebAssembly/testsuite/tree/master/proposals>
 #[rustfmt::skip] 
-pub const PROPOSALS: &[&str] = &["annotations", "exception-handling", "extended-const", "function-references", "gc", "memory64", "multi-memory", "relaxed-simd", "tail-call", "threads", "custom-page-sizes"];
+pub const PROPOSALS: &[&str] = &["annotations", "exception-handling", "extended-const", "function-references", "gc", "memory64", "multi-memory", "relaxed-simd", "tail-call", "threads", "custom-page-sizes", "wide-arithmetic"];
 
 /// List of all tests that apply to the MVP (V1) spec
 /// Note that the tests are still for the latest spec, so the latest version of Wast is used.
@@ -80,7 +80,7 @@ mod tests {
 
             let proposal = proposal.split('/').nth(1).unwrap();
             unique_proposals.insert(proposal.to_owned());
-            assert!(PROPOSALS.contains(&proposal));
+            assert!(PROPOSALS.contains(&proposal), "Missing proposal: {}", proposal);
         }
     }
 }

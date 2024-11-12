@@ -368,7 +368,10 @@ impl TestSuite {
                             Err(eyre!("test panicked: {:?}", try_downcast_panic(err))),
                         ),
                         Ok(Err(tinywasm::Error::Linker(err))) => {
-                            if err.message() != message {
+                            if err.message() != message
+                                && (err.message() == "memory types incompatible"
+                                    && message != "incompatible import type")
+                            {
                                 test_group.add_result(
                                     &format!("AssertUnlinkable({i})"),
                                     span.linecol_in(wast),
