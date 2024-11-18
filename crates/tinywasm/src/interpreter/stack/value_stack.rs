@@ -67,12 +67,15 @@ impl ValueStack {
     }
 
     #[inline]
-    pub(crate) fn calculate_same<T: InternalValue>(&mut self, func: fn(T, T) -> Result<T>) -> Result<()> {
+    pub(crate) fn calculate_same<T: InternalValue>(&mut self, func: impl FnOnce(T, T) -> Result<T>) -> Result<()> {
         T::stack_calculate(self, func)
     }
 
     #[inline]
-    pub(crate) fn calculate<T: InternalValue, U: InternalValue>(&mut self, func: fn(T, T) -> Result<U>) -> Result<()> {
+    pub(crate) fn calculate<T: InternalValue, U: InternalValue>(
+        &mut self,
+        func: impl FnOnce(T, T) -> Result<U>,
+    ) -> Result<()> {
         let v2 = T::stack_pop(self);
         let v1 = T::stack_pop(self);
         U::stack_push(self, func(v1, v2)?);
@@ -80,14 +83,17 @@ impl ValueStack {
     }
 
     #[inline]
-    pub(crate) fn replace_top<T: InternalValue, U: InternalValue>(&mut self, func: fn(T) -> Result<U>) -> Result<()> {
+    pub(crate) fn replace_top<T: InternalValue, U: InternalValue>(
+        &mut self,
+        func: impl FnOnce(T) -> Result<U>,
+    ) -> Result<()> {
         let v1 = T::stack_pop(self);
         U::stack_push(self, func(v1)?);
         Ok(())
     }
 
     #[inline]
-    pub(crate) fn replace_top_same<T: InternalValue>(&mut self, func: fn(T) -> Result<T>) -> Result<()> {
+    pub(crate) fn replace_top_same<T: InternalValue>(&mut self, func: impl Fn(T) -> Result<T>) -> Result<()> {
         T::replace_top(self, func)
     }
 

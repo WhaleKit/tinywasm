@@ -4,6 +4,7 @@ use super::no_std_floats::NoStdFloatExt;
 
 use alloc::{format, rc::Rc, string::ToString};
 use core::ops::ControlFlow;
+use interpreter::simd::exec_next_simd;
 use interpreter::stack::CallFrame;
 use tinywasm_types::*;
 
@@ -12,11 +13,11 @@ use super::stack::{BlockFrame, BlockType, Stack};
 use super::values::*;
 use crate::*;
 
-pub(super) struct Executor<'store, 'stack> {
-    cf: CallFrame,
-    module: ModuleInstance,
-    store: &'store mut Store,
-    stack: &'stack mut Stack,
+pub(crate) struct Executor<'store, 'stack> {
+    pub(crate) cf: CallFrame,
+    pub(crate) module: ModuleInstance,
+    pub(crate) store: &'store mut Store,
+    pub(crate) stack: &'stack mut Stack,
 }
 
 impl<'store, 'stack> Executor<'store, 'stack> {
@@ -302,7 +303,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
             LocalCopy128(from, to) => self.exec_local_copy::<Value128>(*from, *to),
             LocalCopyRef(from, to) => self.exec_local_copy::<ValueRef>(*from, *to),
 
-            Simd(op) => unimplemented!("simd instruction {:?}", op),
+            Simd(op) => exec_next_simd(self, *op).to_cf()?,
         };
 
         self.cf.incr_instr_ptr();

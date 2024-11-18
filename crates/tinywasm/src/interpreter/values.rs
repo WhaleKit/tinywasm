@@ -146,10 +146,10 @@ mod sealed {
 
 pub(crate) trait InternalValue: sealed::Sealed + Into<TinyWasmValue> {
     fn stack_push(stack: &mut ValueStack, value: Self);
-    fn replace_top(stack: &mut ValueStack, func: fn(Self) -> Result<Self>) -> Result<()>
+    fn replace_top(stack: &mut ValueStack, func: impl FnOnce(Self) -> Result<Self>) -> Result<()>
     where
         Self: Sized;
-    fn stack_calculate(stack: &mut ValueStack, func: fn(Self, Self) -> Result<Self>) -> Result<()>
+    fn stack_calculate(stack: &mut ValueStack, func: impl FnOnce(Self, Self) -> Result<Self>) -> Result<()>
     where
         Self: Sized;
 
@@ -197,7 +197,7 @@ macro_rules! impl_internalvalue {
                 }
 
                 #[inline(always)]
-                fn stack_calculate(stack: &mut ValueStack, func: fn(Self, Self) -> Result<Self>) -> Result<()> {
+                fn stack_calculate(stack: &mut ValueStack, func: impl FnOnce(Self, Self) -> Result<Self>) -> Result<()> {
                     let v2 = stack.$stack.pop();
                     let v1 = stack.$stack.last_mut();
                     let (Some(v1), Some(v2)) = (v1, v2) else {
@@ -209,7 +209,7 @@ macro_rules! impl_internalvalue {
                 }
 
                 #[inline(always)]
-                fn replace_top(stack: &mut ValueStack, func: fn(Self) -> Result<Self>) -> Result<()> {
+                fn replace_top(stack: &mut ValueStack, func: impl FnOnce(Self) -> Result<Self>) -> Result<()> {
                     let Some(v) = stack.$stack.last_mut() else {
                         unreachable!("ValueStack underflow, this is a bug");
                     };

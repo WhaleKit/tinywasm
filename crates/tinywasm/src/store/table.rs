@@ -48,10 +48,11 @@ impl TableInstance {
     }
 
     pub(crate) fn get(&self, addr: TableAddr) -> Result<&TableElement> {
-        // self.elements.get(addr as usize).ok_or_else(|| Error::Trap(Trap::UndefinedElement { index: addr as usize }))
-        self.elements.get(addr as usize).ok_or({
-            Error::Trap(Trap::TableOutOfBounds { offset: addr as usize, len: 1, max: self.elements.len() })
-        })
+        self.elements.get(addr as usize).ok_or(Error::Trap(Trap::TableOutOfBounds {
+            offset: addr as usize,
+            len: 1,
+            max: self.elements.len(),
+        }))
     }
 
     pub(crate) fn copy_from_slice(&mut self, dst: usize, src: &[TableElement]) -> Result<()> {
@@ -172,7 +173,7 @@ impl TableElement {
         }
     }
 
-    pub(crate) fn map<F: FnOnce(Addr) -> Addr>(self, f: F) -> Self {
+    pub(crate) fn map(self, f: impl FnOnce(Addr) -> Addr) -> Self {
         match self {
             TableElement::Uninitialized => TableElement::Uninitialized,
             TableElement::Initialized(addr) => TableElement::Initialized(f(addr)),

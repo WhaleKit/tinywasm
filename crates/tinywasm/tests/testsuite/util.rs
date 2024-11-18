@@ -46,7 +46,7 @@ pub fn exec_fn(
     instance.exported_func_untyped(&store, name)?.call(&mut store, args)
 }
 
-pub fn catch_unwind_silent<F: FnOnce() -> R, R>(f: F) -> std::thread::Result<R> {
+pub fn catch_unwind_silent<R>(f: impl FnOnce() -> R) -> std::thread::Result<R> {
     let prev_hook = panic::take_hook();
     panic::set_hook(Box::new(|_| {}));
     let result = panic::catch_unwind(AssertUnwindSafe(f));

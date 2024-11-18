@@ -52,7 +52,7 @@ pub enum ConstInstruction {
 ///   This makes it easier to implement the label stack iteratively.
 ///
 /// See <https://webassembly.github.io/spec/core/binary/instructions.html>
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "archive", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 // should be kept as small as possible (16 bytes max)
 #[rustfmt::skip]
@@ -193,10 +193,10 @@ impl From<SimdInstruction> for Instruction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "archive", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 #[rustfmt::skip] 
-pub enum SimdInstruction {
+pub enum SimdInstruction { 
     V128Load(MemoryArg),
     V128Load8x8S(MemoryArg), V128Load8x8U(MemoryArg),
     V128Load16x4S(MemoryArg), V128Load16x4U(MemoryArg),
@@ -204,7 +204,7 @@ pub enum SimdInstruction {
 
     V128Load8Splat(MemoryArg), V128Load16Splat(MemoryArg), V128Load32Splat(MemoryArg), V128Load64Splat(MemoryArg),
     V128Load8Lane(MemoryArg, u8), V128Load16Lane(MemoryArg, u8), V128Load32Lane(MemoryArg, u8), V128Load64Lane(MemoryArg, u8),
-    
+
     V128Load32Zero(MemoryArg), V128Load64Zero(MemoryArg),
 
     V128Store(MemoryArg), V128Store8Lane(MemoryArg, u8), V128Store16Lane(MemoryArg, u8), V128Store32Lane(MemoryArg, u8), V128Store64Lane(MemoryArg, u8),
