@@ -23,7 +23,7 @@ struct CustomTests;
 /// 
 /// Includes all proposals from <https://github.com/WebAssembly/testsuite/tree/master/proposals>
 #[rustfmt::skip] 
-pub const PROPOSALS: &[&str] = &["annotations", "exception-handling", "extended-const", "function-references", "gc", "memory64", "multi-memory", "relaxed-simd", "tail-call", "threads", "custom-page-sizes", "wide-arithmetic"];
+pub const PROPOSALS: &[&str] = &["annotations", "exception-handling", "extended-const", "function-references", "gc", "memory64", "multi-memory", "relaxed-simd", "tail-call", "threads", "custom-page-sizes", "wide-arithmetic", "wasm-3.0"];
 
 /// List of all tests that apply to the MVP (V1) spec
 /// Note that the tests are still for the latest spec, so the latest version of Wast is used.
