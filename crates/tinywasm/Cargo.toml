@@ -35,7 +35,6 @@ logging=["log", "tinywasm-parser?/logging", "tinywasm-types/logging"]
 std=["tinywasm-parser?/std", "tinywasm-types/std"]
 parser=["dep:tinywasm-parser"]
 archive=["tinywasm-types/archive"]
-# nightly=[]
 
 [[test]]
 name="test-wasm-1"
