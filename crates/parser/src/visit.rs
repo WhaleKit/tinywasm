@@ -20,16 +20,6 @@ macro_rules! validate_then_visit {
     )*};
 }
 
-macro_rules! validate_then_visit_simd {
-    ($( @$proposal:ident $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident ($($ann:tt)*))*) => {$(
-        fn $visit(&mut self $($(,$arg: $argty)*)?) -> Self::Output {
-            self.1.$visit($($($arg.clone()),*)?);
-            self.1.validator_visitor(self.0).simd_visitor().expect("simd_visitor is supported by the validator").$visit($($($arg),*)?)?;
-            Ok(())
-        }
-    )*};
-}
-
 impl<'a, R: WasmModuleResources> VisitOperator<'a> for ValidateThenVisit<'_, R> {
     type Output = Result<()>;
     wasmparser::for_each_visit_operator!(validate_then_visit);
@@ -40,7 +30,7 @@ impl<'a, R: WasmModuleResources> VisitOperator<'a> for ValidateThenVisit<'_, R> 
 }
 
 impl<R: WasmModuleResources> VisitSimdOperator<'_> for ValidateThenVisit<'_, R> {
-    wasmparser::for_each_visit_simd_operator!(validate_then_visit_simd);
+    wasmparser::for_each_visit_simd_operator!(validate_then_visit);
 }
 
 pub(crate) fn process_operators_and_validate<R: WasmModuleResources>(
@@ -137,8 +127,8 @@ impl<R: WasmModuleResources> FunctionBuilder<R> {
     pub(crate) fn validator_visitor(
         &mut self,
         offset: usize,
-    ) -> impl VisitOperator<'_, Output = Result<(), wasmparser::BinaryReaderError>> {
-        self.validator.visitor(offset)
+    ) -> impl VisitOperator<'_, Output = Result<(), wasmparser::BinaryReaderError>> + VisitSimdOperator<'_> {
+        self.validator.simd_visitor(offset)
     }
 
     pub(crate) fn validator_finish(&mut self, offset: usize) -> Result<(), wasmparser::BinaryReaderError> {
@@ -173,8 +163,8 @@ macro_rules! impl_visit_operator {
     (@@sign_extension $($rest:tt)* ) => {};
     (@@saturating_float_to_int $($rest:tt)* ) => {};
     (@@bulk_memory $($rest:tt)* ) => {};
-    // (@@tail_call $($rest:tt)* ) => {};
     (@@simd $($rest:tt)* ) => {};
+
     (@@$proposal:ident $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident ($($ann:tt)*)) => {
         #[cold]
         fn $visit(&mut self $($(,$arg: $argty)*)?) {
@@ -212,14 +202,6 @@ impl<'a, R: WasmModuleResources> wasmparser::VisitOperator<'a> for FunctionBuild
         visit_memory_init(MemoryInit, u32, u32), visit_memory_copy(MemoryCopy, u32, u32), visit_table_init(TableInit, u32, u32), visit_memory_fill(MemoryFill, u32), visit_data_drop(DataDrop, u32), visit_elem_drop(ElemDrop, u32)
     }
 
-    // fn visit_return_call(&mut self, function_index: u32) -> Self::Output {
-    //     self.instructions.push(Instruction::ReturnCall(function_index));
-    // }
-
-    // fn visit_return_call_indirect(&mut self, type_index: u32, table_index: u32) -> Self::Output {
-    //     self.instructions.push(Instruction::ReturnCallIndirect(type_index, table_index));
-    // }
-
     fn visit_global_set(&mut self, global_index: u32) -> Self::Output {
         match self.validator.get_operand_type(0) {
             Some(Some(t)) => self.instructions.push(match t {
@@ -247,6 +229,7 @@ impl<'a, R: WasmModuleResources> wasmparser::VisitOperator<'a> for FunctionBuild
             _ => self.visit_unreachable(),
         }
     }
+
     fn visit_select(&mut self) -> Self::Output {
         match self.validator.get_operand_type(1) {
             Some(Some(t)) => self.visit_typed_select(t),
