@@ -1,5 +1,6 @@
 #![allow(unused)]
-use eyre::Result;
+use eyre::{eyre, Result};
+use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 use std::io::{BufRead, Seek, SeekFrom};
 use std::{
@@ -8,13 +9,10 @@ use std::{
     io::BufReader,
 };
 
-mod indexmap;
 mod run;
 mod util;
 
 use serde::{Deserialize, Serialize};
-
-use self::indexmap::IndexMap;
 
 #[derive(Serialize, Deserialize)]
 pub struct TestGroupResult {
@@ -28,6 +26,16 @@ pub struct TestSuite(BTreeMap<String, TestGroup>, Vec<String>);
 impl TestSuite {
     pub fn set_log_level(level: log::LevelFilter) {
         pretty_env_logger::formatted_builder().filter_level(level).init();
+    }
+
+    pub fn report_status(&self) -> Result<()> {
+        if self.failed() {
+            println!();
+            Err(eyre!(format!("{}:\n{:#?}", "failed one or more tests".red().bold(), self)))
+        } else {
+            println!("\n\npassed all tests:\n{self:#?}");
+            Ok(())
+        }
     }
 
     pub fn print_errors(&self) {

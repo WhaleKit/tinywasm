@@ -8,7 +8,6 @@ pub fn try_downcast_panic(panic: Box<dyn std::any::Any + Send>) -> String {
     let info = panic.downcast_ref::<panic::PanicHookInfo>().or(None).map(ToString::to_string).clone();
     let info_string = panic.downcast_ref::<String>().cloned();
     let info_str = panic.downcast::<&str>().ok().map(|s| *s);
-
     info.unwrap_or(info_str.unwrap_or(&info_string.unwrap_or("unknown panic".to_owned())).to_string())
 }
 
@@ -171,6 +170,7 @@ enum Bits {
     U32(u32),
     U64(u64),
 }
+
 trait FloatToken {
     fn bits(&self) -> Bits;
     fn canonical_nan() -> WasmValue;
@@ -182,6 +182,7 @@ trait FloatToken {
         }
     }
 }
+
 impl FloatToken for wast::token::F32 {
     fn bits(&self) -> Bits {
         Bits::U32(self.bits)
@@ -195,6 +196,7 @@ impl FloatToken for wast::token::F32 {
         WasmValue::F32(f32::NAN)
     }
 }
+
 impl FloatToken for wast::token::F64 {
     fn bits(&self) -> Bits {
         Bits::U64(self.bits)

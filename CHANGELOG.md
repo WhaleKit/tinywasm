@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking:**: New backwards-incompatible version of the twasm format (upgraded `rkyv` to 0.8.0)
-- Increased MSRV to 1.81.0
+- Increased MSRV to 1.83.0
 
 ### Fixed
 

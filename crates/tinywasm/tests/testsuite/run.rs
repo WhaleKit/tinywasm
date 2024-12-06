@@ -3,20 +3,22 @@ use std::{borrow::Cow, collections::HashMap};
 
 use super::TestSuite;
 use eyre::{eyre, Result};
+use indexmap::IndexMap;
 use log::{debug, error, info};
 use tinywasm::{Extern, Imports, ModuleInstance};
 use tinywasm_types::{ExternVal, MemoryType, ModuleInstanceAddr, TableType, ValType, WasmValue};
+use wasm_testsuite::data::TestFile;
 use wast::{lexer::Lexer, parser::ParseBuffer, Wast};
 
 #[derive(Default)]
-struct RegisteredModules {
+struct ModuleRegistry {
     modules: HashMap<String, ModuleInstanceAddr>,
 
     named_modules: HashMap<String, ModuleInstanceAddr>,
     last_module: Option<ModuleInstanceAddr>,
 }
 
-impl RegisteredModules {
+impl ModuleRegistry {
     fn modules(&self) -> &HashMap<String, ModuleInstanceAddr> {
         &self.modules
     }
@@ -70,10 +72,15 @@ impl RegisteredModules {
 
 impl TestSuite {
     pub fn run_paths(&mut self, tests: &[&str]) -> Result<()> {
-        for group in tests {
-            let group_wast = std::fs::read(group).expect("failed to read test wast");
-            let group_wast = Cow::Owned(group_wast);
-            self.run_group(group, group_wast).expect("failed to run group");
+        for file_name in tests {
+            let group_wast = std::fs::read(file_name).expect("failed to read test wast");
+            let file = TestFile {
+                contents: std::str::from_utf8(&group_wast).expect("failed to convert to utf8"),
+                name: file_name.to_string(),
+                parent: "(custom group)".into(),
+            };
+
+            self.run_file(file).expect("failed to run group");
         }
 
         Ok(())
@@ -147,40 +154,33 @@ impl TestSuite {
         Ok(imports)
     }
 
-    pub fn run_spec_group<T: AsRef<str>>(&mut self, tests: impl IntoIterator<Item = T>) -> Result<()> {
+    pub fn run_files<'a>(&mut self, tests: impl IntoIterator<Item = TestFile<'a>>) -> Result<()> {
         tests.into_iter().for_each(|group| {
-            println!("running group: {}", group.as_ref());
-            let group = group.as_ref();
-            let group_wast = wasm_testsuite::get_test_wast(group).expect("failed to get test wast");
-            if self.1.contains(&(*group).to_string()) {
-                info!("skipping group: {}", group);
-                self.test_group(&format!("{group} (skipped)"), group);
+            let name = group.name();
+            println!("running group: {}", name);
+            if self.1.contains(&name.to_string()) {
+                info!("skipping group: {name}");
+                self.test_group(&format!("{name} (skipped)"), name);
                 return;
             }
 
-            self.run_group(group, group_wast).expect("failed to run group");
+            self.run_file(group).expect("failed to run group");
         });
 
         Ok(())
     }
 
-    pub fn run_group(&mut self, group_name: &str, group_wast: Cow<'_, [u8]>) -> Result<()> {
-        let file_name = group_name.split('/').last().unwrap_or(group_name);
-        let test_group = self.test_group(file_name, group_name);
-        let wast = std::str::from_utf8(&group_wast).expect("failed to convert wast to utf8");
-
-        let mut lexer = Lexer::new(wast);
-        // we need to allow confusing unicode characters since they are technically valid wasm
-        lexer.allow_confusing_unicode(true);
-
-        let buf = ParseBuffer::new_with_lexer(lexer).expect("failed to create parse buffer");
-        let wast_data = wast::parser::parse::<Wast>(&buf).expect("failed to parse wat");
+    pub fn run_file<'a>(&mut self, file: TestFile<'a>) -> Result<()> {
+        let test_group = self.test_group(file.name(), file.parent());
+        let wast_raw = file.raw();
+        let wast = file.wast()?;
+        let directives = wast.directives()?;
 
         let mut store = tinywasm::Store::default();
-        let mut registered_modules = RegisteredModules::default();
+        let mut module_registry = ModuleRegistry::default();
 
-        println!("running {} tests for group: {}", wast_data.directives.len(), group_name);
-        for (i, directive) in wast_data.directives.into_iter().enumerate() {
+        println!("running {} tests for group: {}", directives.len(), file.name());
+        for (i, directive) in directives.into_iter().enumerate() {
             let span = directive.span();
             use wast::WastDirective::{
                 AssertExhaustion, AssertInvalid, AssertMalformed, AssertReturn, AssertTrap, AssertUnlinkable, Invoke,
@@ -189,16 +189,16 @@ impl TestSuite {
 
             match directive {
                 Register { span, name, .. } => {
-                    let Some(last) = registered_modules.last(&store) else {
+                    let Some(last) = module_registry.last(&store) else {
                         test_group.add_result(
                             &format!("Register({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("no module to register")),
                         );
                         continue;
                     };
-                    registered_modules.register(name.to_string(), last.id());
-                    test_group.add_result(&format!("Register({i})"), span.linecol_in(wast), Ok(()));
+                    module_registry.register(name.to_string(), last.id());
+                    test_group.add_result(&format!("Register({i})"), span.linecol_in(wast_raw), Ok(()));
                 }
 
                 Wat(module) => {
@@ -208,7 +208,7 @@ impl TestSuite {
                         let m = parse_module_bytes(&bytes).expect("failed to parse module bytes");
 
                         let module_instance = tinywasm::Module::from(m)
-                            .instantiate(&mut store, Some(Self::imports(registered_modules.modules()).unwrap()))
+                            .instantiate(&mut store, Some(Self::imports(module_registry.modules()).unwrap()))
                             .expect("failed to instantiate module");
 
                         (name, module_instance)
@@ -217,15 +217,15 @@ impl TestSuite {
 
                     match &result {
                         Err(err) => debug!("failed to parse module: {:?}", err),
-                        Ok((name, module)) => registered_modules.update_last_module(module.id(), name.clone()),
+                        Ok((name, module)) => module_registry.update_last_module(module.id(), name.clone()),
                     };
 
-                    test_group.add_result(&format!("Wat({i})"), span.linecol_in(wast), result.map(|_| ()));
+                    test_group.add_result(&format!("Wat({i})"), span.linecol_in(wast_raw), result.map(|_| ()));
                 }
 
                 AssertMalformed { span, mut module, message } => {
                     let Ok(module) = module.encode() else {
-                        test_group.add_result(&format!("AssertMalformed({i})"), span.linecol_in(wast), Ok(()));
+                        test_group.add_result(&format!("AssertMalformed({i})"), span.linecol_in(wast_raw), Ok(()));
                         continue;
                     };
 
@@ -235,12 +235,13 @@ impl TestSuite {
 
                     test_group.add_result(
                         &format!("AssertMalformed({i})"),
-                        span.linecol_in(wast),
+                        span.linecol_in(wast_raw),
                         match res {
                             Ok(_) => {
-                                // // skip "zero byte expected" as the magic number is not checked by wasmparser
-                                // (Don't need to error on this, doesn't matter if it's malformed)
-                                if message == "zero byte expected" {
+                                // - skip "zero byte expected" as the magic number is not checked by wasmparser
+                                //   (Don't need to error on this, doesn't matter if it's malformed)
+                                // - skip "integer representation too long" as this has some false positives
+                                if message == "zero byte expected" || message == "integer representation too long" {
                                     continue;
                                 }
 
@@ -253,7 +254,7 @@ impl TestSuite {
 
                 AssertInvalid { span, mut module, message } => {
                     if ["multiple memories"].contains(&message) {
-                        test_group.add_result(&format!("AssertInvalid({i})"), span.linecol_in(wast), Ok(()));
+                        test_group.add_result(&format!("AssertInvalid({i})"), span.linecol_in(wast_raw), Ok(()));
                         continue;
                     }
 
@@ -263,7 +264,7 @@ impl TestSuite {
 
                     test_group.add_result(
                         &format!("AssertInvalid({i})"),
-                        span.linecol_in(wast),
+                        span.linecol_in(wast_raw),
                         match res {
                             Ok(_) => Err(eyre!("expected module to be invalid")),
                             Err(_) => Ok(()),
@@ -272,7 +273,7 @@ impl TestSuite {
                 }
 
                 AssertExhaustion { call, message, span } => {
-                    let module = registered_modules.get_idx(call.module);
+                    let module = module_registry.get_idx(call.module);
                     let args = convert_wastargs(call.args).expect("failed to convert args");
                     let res =
                         catch_unwind_silent(|| exec_fn_instance(module, &mut store, call.name, &args).map(|_| ()));
@@ -280,7 +281,7 @@ impl TestSuite {
                     let Ok(Err(tinywasm::Error::Trap(trap))) = res else {
                         test_group.add_result(
                             &format!("AssertExhaustion({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("expected trap")),
                         );
                         continue;
@@ -289,13 +290,13 @@ impl TestSuite {
                     if !message.starts_with(trap.message()) {
                         test_group.add_result(
                             &format!("AssertExhaustion({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("expected trap: {}, got: {}", message, trap.message())),
                         );
                         continue;
                     }
 
-                    test_group.add_result(&format!("AssertExhaustion({i})"), span.linecol_in(wast), Ok(()));
+                    test_group.add_result(&format!("AssertExhaustion({i})"), span.linecol_in(wast_raw), Ok(()));
                 }
 
                 AssertTrap { exec, message, span } => {
@@ -305,10 +306,8 @@ impl TestSuite {
                                 let module = parse_module_bytes(&wat.encode().expect("failed to encode module"))
                                     .expect("failed to parse module");
                                 let module = tinywasm::Module::from(module);
-                                module.instantiate(
-                                    &mut store,
-                                    Some(Self::imports(registered_modules.modules()).unwrap()),
-                                )?;
+                                module
+                                    .instantiate(&mut store, Some(Self::imports(module_registry.modules()).unwrap()))?;
                                 return Ok(());
                             }
                             wast::WastExecute::Get { module: _, global: _, .. } => {
@@ -317,7 +316,7 @@ impl TestSuite {
                             wast::WastExecute::Invoke(invoke) => invoke,
                         };
 
-                        let module = registered_modules.get_idx(invoke.module);
+                        let module = module_registry.get_idx(invoke.module);
                         let args = convert_wastargs(invoke.args).expect("failed to convert args");
                         exec_fn_instance(module, &mut store, invoke.name, &args).map(|_| ())
                     });
@@ -325,29 +324,29 @@ impl TestSuite {
                     match res {
                         Err(err) => test_group.add_result(
                             &format!("AssertTrap({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("test panicked: {:?}", try_downcast_panic(err))),
                         ),
                         Ok(Err(tinywasm::Error::Trap(trap))) => {
                             if !message.starts_with(trap.message()) {
                                 test_group.add_result(
                                     &format!("AssertTrap({i})"),
-                                    span.linecol_in(wast),
+                                    span.linecol_in(wast_raw),
                                     Err(eyre!("expected trap: {}, got: {}", message, trap.message())),
                                 );
                                 continue;
                             }
 
-                            test_group.add_result(&format!("AssertTrap({i})"), span.linecol_in(wast), Ok(()));
+                            test_group.add_result(&format!("AssertTrap({i})"), span.linecol_in(wast_raw), Ok(()));
                         }
                         Ok(Err(err)) => test_group.add_result(
                             &format!("AssertTrap({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("expected trap, {}, got: {:?}", message, err)),
                         ),
                         Ok(Ok(())) => test_group.add_result(
                             &format!("AssertTrap({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("expected trap {}, got Ok", message)),
                         ),
                     }
@@ -358,13 +357,13 @@ impl TestSuite {
                         let module = parse_module_bytes(&module.encode().expect("failed to encode module"))
                             .expect("failed to parse module");
                         let module = tinywasm::Module::from(module);
-                        module.instantiate(&mut store, Some(Self::imports(registered_modules.modules()).unwrap()))
+                        module.instantiate(&mut store, Some(Self::imports(module_registry.modules()).unwrap()))
                     });
 
                     match res {
                         Err(err) => test_group.add_result(
                             &format!("AssertUnlinkable({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("test panicked: {:?}", try_downcast_panic(err))),
                         ),
                         Ok(Err(tinywasm::Error::Linker(err))) => {
@@ -374,22 +373,22 @@ impl TestSuite {
                             {
                                 test_group.add_result(
                                     &format!("AssertUnlinkable({i})"),
-                                    span.linecol_in(wast),
+                                    span.linecol_in(wast_raw),
                                     Err(eyre!("expected linker error: {}, got: {}", message, err.message())),
                                 );
                                 continue;
                             }
 
-                            test_group.add_result(&format!("AssertUnlinkable({i})"), span.linecol_in(wast), Ok(()));
+                            test_group.add_result(&format!("AssertUnlinkable({i})"), span.linecol_in(wast_raw), Ok(()));
                         }
                         Ok(Err(err)) => test_group.add_result(
                             &format!("AssertUnlinkable({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("expected linker error, {}, got: {:?}", message, err)),
                         ),
                         Ok(Ok(_)) => test_group.add_result(
                             &format!("AssertUnlinkable({i})"),
-                            span.linecol_in(wast),
+                            span.linecol_in(wast_raw),
                             Err(eyre!("expected linker error {}, got Ok", message)),
                         ),
                     }
@@ -400,7 +399,7 @@ impl TestSuite {
 
                     let res: Result<Result<()>, _> = catch_unwind_silent(|| {
                         let args = convert_wastargs(invoke.args)?;
-                        let module = registered_modules.get_idx(invoke.module);
+                        let module = module_registry.get_idx(invoke.module);
                         exec_fn_instance(module, &mut store, invoke.name, &args).map_err(|e| {
                             error!("failed to execute function: {:?}", e);
                             e
@@ -409,7 +408,7 @@ impl TestSuite {
                     });
 
                     let res = res.map_err(|e| eyre!("test panicked: {:?}", try_downcast_panic(e))).and_then(|r| r);
-                    test_group.add_result(&format!("Invoke({name}-{i})"), span.linecol_in(wast), res);
+                    test_group.add_result(&format!("Invoke({name}-{i})"), span.linecol_in(wast_raw), res);
                 }
 
                 AssertReturn { span, exec, results } => {
@@ -419,11 +418,11 @@ impl TestSuite {
                     let invoke = match match exec {
                         wast::WastExecute::Wat(_) => Err(eyre!("wat not supported")),
                         wast::WastExecute::Get { module: module_id, global, .. } => {
-                            let module = registered_modules.get(module_id, &store);
+                            let module = module_registry.get(module_id, &store);
                             let Some(module) = module else {
                                 test_group.add_result(
                                     &format!("AssertReturn(unsupported-{i})"),
-                                    span.linecol_in(wast),
+                                    span.linecol_in(wast_raw),
                                     Err(eyre!("no module to get global from")),
                                 );
                                 continue;
@@ -437,7 +436,7 @@ impl TestSuite {
                                 Err(err) => {
                                     test_group.add_result(
                                         &format!("AssertReturn(unsupported-{i})"),
-                                        span.linecol_in(wast),
+                                        span.linecol_in(wast_raw),
                                         Err(eyre!("failed to get global: {:?}", err)),
                                     );
                                     continue;
@@ -449,7 +448,7 @@ impl TestSuite {
                             if !module_global.eq_loose(expected) {
                                 test_group.add_result(
                                     &format!("AssertReturn(unsupported-{i})"),
-                                    span.linecol_in(wast),
+                                    span.linecol_in(wast_raw),
                                     Err(eyre!("global value did not match: {:?} != {:?}", module_global, expected)),
                                 );
                                 continue;
@@ -457,7 +456,7 @@ impl TestSuite {
 
                             test_group.add_result(
                                 &format!("AssertReturn({global}-{i})"),
-                                span.linecol_in(wast),
+                                span.linecol_in(wast_raw),
                                 Ok(()),
                             );
 
@@ -470,7 +469,7 @@ impl TestSuite {
                         Err(err) => {
                             test_group.add_result(
                                 &format!("AssertReturn(unsupported-{i})"),
-                                span.linecol_in(wast),
+                                span.linecol_in(wast_raw),
                                 Err(eyre!("unsupported directive: {:?}", err)),
                             );
                             continue;
@@ -481,7 +480,7 @@ impl TestSuite {
                     let res: Result<Result<()>, _> = catch_unwind_silent(|| {
                         debug!("invoke: {:?}", invoke);
                         let args = convert_wastargs(invoke.args)?;
-                        let module = registered_modules.get_idx(invoke.module);
+                        let module = module_registry.get_idx(invoke.module);
                         let outcomes = exec_fn_instance(module, &mut store, invoke.name, &args).map_err(|e| {
                             error!("failed to execute function: {:?}", e);
                             e
@@ -504,11 +503,11 @@ impl TestSuite {
                     });
 
                     let res = res.map_err(|e| eyre!("test panicked: {:?}", try_downcast_panic(e))).and_then(|r| r);
-                    test_group.add_result(&format!("AssertReturn({invoke_name}-{i})"), span.linecol_in(wast), res);
+                    test_group.add_result(&format!("AssertReturn({invoke_name}-{i})"), span.linecol_in(wast_raw), res);
                 }
                 _ => test_group.add_result(
                     &format!("Unknown({i})"),
-                    span.linecol_in(wast),
+                    span.linecol_in(wast_raw),
                     Err(eyre!("unsupported directive")),
                 ),
             }
