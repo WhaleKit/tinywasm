@@ -20,7 +20,7 @@ tinywasm-types={version="0.9.0-alpha.0", path="../types", default-features=false
 libm={version="0.2", default-features=false}
 
 [dev-dependencies]
-wasm-testsuite={version="0.3.2"}
+wasm-testsuite={version="0.3.3"}
 indexmap="2.7"
 wast={workspace=true}
 eyre={workspace=true}
@@ -43,6 +43,10 @@ harness=false
 
 [[test]]
 name="test-wasm-2"
+harness=false
+
+[[test]]
+name="test-wasm-3"
 harness=false
 
 [[test]]

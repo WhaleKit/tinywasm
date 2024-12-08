@@ -779,9 +779,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-testsuite"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dc81f607820a4f651559ad68709106d53bf50c20f01effe90f4da6954d4885d"
+checksum = "aec2d7c897c2af9a57776b7c705a9d3f5f7c4d782eeaa0cf91520f8086ab0382"
 dependencies = [
  "include_dir",
  "wast",

@@ -1,5 +1,5 @@
 use crate::testsuite::util::*;
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, fs::canonicalize, path::PathBuf};
 
 use super::TestSuite;
 use eyre::{eyre, Result};
@@ -71,12 +71,12 @@ impl ModuleRegistry {
 }
 
 impl TestSuite {
-    pub fn run_paths(&mut self, tests: &[&str]) -> Result<()> {
+    pub fn run_paths(&mut self, tests: &[PathBuf]) -> Result<()> {
         for file_name in tests {
             let group_wast = std::fs::read(file_name).expect("failed to read test wast");
             let file = TestFile {
                 contents: std::str::from_utf8(&group_wast).expect("failed to convert to utf8"),
-                name: file_name.to_string(),
+                name: canonicalize(file_name).expect("failed to canonicalize file name").to_string_lossy().to_string(),
                 parent: "(custom group)".into(),
             };
 
@@ -240,12 +240,12 @@ impl TestSuite {
                             Ok(_) => {
                                 // - skip "zero byte expected" as the magic number is not checked by wasmparser
                                 //   (Don't need to error on this, doesn't matter if it's malformed)
-                                // - skip "integer representation too long" as this has some false positives
+                                // - skip "integer representation too long" as this has some false positives on older tests
                                 if message == "zero byte expected" || message == "integer representation too long" {
                                     continue;
                                 }
 
-                                Err(eyre!("expected module to be malformed"))
+                                Err(eyre!("expected module to be malformed: {message}"))
                             }
                             Err(_) => Ok(()),
                         },
@@ -413,7 +413,17 @@ impl TestSuite {
 
                 AssertReturn { span, exec, results } => {
                     info!("AssertReturn: {:?}", exec);
-                    let expected = convert_wastret(results.into_iter())?;
+                    let expected = match convert_wastret(results.into_iter()) {
+                        Err(err) => {
+                            test_group.add_result(
+                                &format!("AssertReturn(unsupported-{i})"),
+                                span.linecol_in(wast_raw),
+                                Err(eyre!("failed to convert expected results: {:?}", err)),
+                            );
+                            continue;
+                        }
+                        Ok(expected) => expected,
+                    };
 
                     let invoke = match match exec {
                         wast::WastExecute::Wat(_) => Err(eyre!("wat not supported")),
