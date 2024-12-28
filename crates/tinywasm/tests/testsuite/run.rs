@@ -8,7 +8,8 @@ use log::{debug, error, info};
 use tinywasm::{Extern, Imports, ModuleInstance};
 use tinywasm_types::{ExternVal, MemoryType, ModuleInstanceAddr, TableType, ValType, WasmValue};
 use wasm_testsuite::data::TestFile;
-use wast::{lexer::Lexer, parser::ParseBuffer, Wast};
+use wasm_testsuite::wast::{lexer::Lexer, parser::ParseBuffer, Wast};
+use wasm_testsuite::wast;
 
 #[derive(Default)]
 struct ModuleRegistry {

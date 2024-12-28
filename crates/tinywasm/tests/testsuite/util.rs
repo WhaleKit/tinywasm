@@ -2,7 +2,8 @@ use std::panic::{self, AssertUnwindSafe};
 
 use eyre::{bail, eyre, Result};
 use tinywasm_types::{ModuleInstanceAddr, TinyWasmModule, ValType, WasmValue};
-use wast::{core::AbstractHeapType, QuoteWat};
+use wasm_testsuite::wast::{core::AbstractHeapType, QuoteWat};
+use wasm_testsuite::wast;
 
 pub fn try_downcast_panic(panic: Box<dyn std::any::Any + Send>) -> String {
     let info = panic.downcast_ref::<panic::PanicHookInfo>().or(None).map(ToString::to_string).clone();
