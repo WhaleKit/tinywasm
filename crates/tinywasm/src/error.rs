@@ -29,6 +29,9 @@ pub enum Error {
     /// The store is not the one that the module instance was instantiated in
     InvalidStore,
 
+    /// A host function did not return results expected of it's type
+    InvalidHostFnReturn,
+
     #[cfg(feature = "std")]
     /// An I/O error occurred
     Io(crate::std::io::Error),
@@ -185,6 +188,7 @@ impl Display for Error {
             Self::UnsupportedFeature(feature) => write!(f, "unsupported feature: {feature}"),
             Self::FuncDidNotReturn => write!(f, "function did not return"),
             Self::InvalidStore => write!(f, "invalid store"),
+            Self::InvalidHostFnReturn=>write!(f, "Host function returned wrong type(s)")
         }
     }
 }
