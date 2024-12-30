@@ -2,7 +2,7 @@ use crate::interpreter::stack::{CallFrame, Stack};
 use crate::{log, unlikely, Function};
 use crate::{Error, FuncContext, Result, Store};
 use alloc::{boxed::Box, format, string::String, string::ToString, vec, vec::Vec};
-use tinywasm_types::{FuncType, ModuleInstanceAddr, ValType, WasmValue};
+use tinywasm_types::{FuncType, ModuleInstanceAddr, ValType, WasmValue, WasmFuncRef, WasmExternRef};
 
 #[derive(Debug)]
 /// A function handle
@@ -219,6 +219,18 @@ impl ToValType for f64 {
     }
 }
 
+impl ToValType for WasmExternRef {
+    fn to_val_type() -> ValType {
+        ValType::RefExtern
+    }
+}
+
+impl ToValType for WasmFuncRef {
+    fn to_val_type() -> ValType {
+        ValType::RefFunc
+    }
+}
+
 macro_rules! impl_val_types_from_tuple {
     ($($t:ident),+) => {
         impl<$($t),+> ValTypesFromTuple for ($($t,)+)
@@ -251,11 +263,15 @@ impl_from_wasm_value_tuple_single!(i32);
 impl_from_wasm_value_tuple_single!(i64);
 impl_from_wasm_value_tuple_single!(f32);
 impl_from_wasm_value_tuple_single!(f64);
+impl_from_wasm_value_tuple_single!(WasmFuncRef);
+impl_from_wasm_value_tuple_single!(WasmExternRef);
 
 impl_into_wasm_value_tuple_single!(i32);
 impl_into_wasm_value_tuple_single!(i64);
 impl_into_wasm_value_tuple_single!(f32);
 impl_into_wasm_value_tuple_single!(f64);
+impl_into_wasm_value_tuple_single!(WasmFuncRef);
+impl_into_wasm_value_tuple_single!(WasmExternRef);
 
 impl_val_types_from_tuple!(T1);
 impl_val_types_from_tuple!(T1, T2);

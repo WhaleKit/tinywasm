@@ -180,6 +180,32 @@ impl WasmValue {
     }
 }
 
+/// a wrapper for `funcref` value for use in typed wrappers
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WasmFuncRef(FuncAddr);
+
+/// a wrapper for `externref` value for use in typed wrappers
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WasmExternRef(ExternAddr);
+
+macro_rules! impl_newtype_from_into {
+    ($wrapper:ty, $underlying:ty) => {
+        impl From<$underlying> for $wrapper {
+            fn from(value: $underlying) -> Self {
+                Self(value)
+            }
+        }
+        impl From<$wrapper> for $underlying {
+            fn from(value: $wrapper) -> Self {
+                value.0
+            }
+        }
+    };
+}
+
+impl_newtype_from_into!(WasmFuncRef, FuncAddr);
+impl_newtype_from_into!(WasmExternRef, ExternAddr);
+
 /// Type of a WebAssembly value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "archive", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
@@ -219,7 +245,7 @@ macro_rules! impl_conversion_for_wasmvalue {
             impl From<$t> for WasmValue {
                 #[inline]
                 fn from(i: $t) -> Self {
-                    Self::$variant(i)
+                    Self::$variant(i.into())
                 }
             }
 
@@ -230,7 +256,7 @@ macro_rules! impl_conversion_for_wasmvalue {
                 #[inline]
                 fn try_from(value: WasmValue) -> Result<Self, Self::Error> {
                     if let WasmValue::$variant(i) = value {
-                        Ok(i)
+                        Ok(i.into())
                     } else {
                         cold();
                         Err(())
@@ -241,4 +267,4 @@ macro_rules! impl_conversion_for_wasmvalue {
     }
 }
 
-impl_conversion_for_wasmvalue! { i32 => I32, i64 => I64, f32 => F32, f64 => F64, u128 => V128 }
+impl_conversion_for_wasmvalue! { i32 => I32, i64 => I64, f32 => F32, f64 => F64, u128 => V128, WasmFuncRef=>RefFunc, WasmExternRef=>RefExtern }
