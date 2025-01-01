@@ -1,9 +1,10 @@
 use core::ops::ControlFlow;
 
 use super::BlockType;
+use crate::interpreter::executor::ReasonToBreak;
 use crate::interpreter::values::*;
+use crate::unlikely;
 use crate::Trap;
-use crate::{unlikely, Error};
 
 use alloc::boxed::Box;
 use alloc::{rc::Rc, vec, vec::Vec};
@@ -28,9 +29,9 @@ impl CallStack {
     }
 
     #[inline]
-    pub(crate) fn push(&mut self, call_frame: CallFrame) -> ControlFlow<Option<Error>> {
+    pub(crate) fn push(&mut self, call_frame: CallFrame) -> ControlFlow<ReasonToBreak> {
         if unlikely((self.stack.len() + 1) >= MAX_CALL_STACK_SIZE) {
-            return ControlFlow::Break(Some(Trap::CallStackOverflow.into()));
+            return ControlFlow::Break(ReasonToBreak::Errored(Trap::CallStackOverflow.into()));
         }
         self.stack.push(call_frame);
         ControlFlow::Continue(())
@@ -108,7 +109,7 @@ impl CallFrame {
         blocks: &mut super::BlockStack,
     ) -> Option<()> {
         let break_to = blocks.get_relative_to(break_to_relative, self.block_ptr)?;
-
+        
         // instr_ptr points to the label instruction, but the next step
         // will increment it by 1 since we're changing the "current" instr_ptr
         match break_to.ty {

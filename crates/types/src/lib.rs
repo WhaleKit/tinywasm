@@ -10,7 +10,7 @@
 
 extern crate alloc;
 use alloc::boxed::Box;
-use core::{fmt::Debug, ops::Range};
+use core::{fmt::Debug, ops::Range, any::Any};
 
 // Memory defaults
 const MEM_PAGE_SIZE: u64 = 65536;
@@ -408,3 +408,10 @@ pub enum ElementItem {
     Func(FuncAddr),
     Expr(ConstInstruction),
 }
+
+// concider adding lifetime
+// yielded value might benefit from referencing something in 
+// suspended host coro, and resume argument - from down the callstack
+// however, that would make executor structure more difficult
+pub type YieldedValue = Option<Box<dyn Any + Send + Sync>>;
+pub type ResumeArgument = Option<Box<dyn Any + Send + Sync>>;

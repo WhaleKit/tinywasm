@@ -5,8 +5,9 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Debug;
 
+use crate::coro::CoroState;
 use crate::func::{FromWasmValueTuple, IntoWasmValueTuple, ValTypesFromTuple};
-use crate::{log, LinkingError, MemoryRef, MemoryRefMut, Result};
+use crate::{coro, log, LinkingError, MemoryRef, MemoryRefMut, Result};
 use tinywasm_types::*;
 
 /// The internal representation of a function
@@ -28,6 +29,11 @@ impl Function {
     }
 }
 
+/// A "resumable" function. If a host function need to suspend wasm execution
+/// it can return [`coro::PotentialCoroCallResult::Suspended`] with an object that implements this trait
+pub trait HostCoroState: for<'a> CoroState<Vec<WasmValue>, FuncContext<'a>> + core::fmt::Debug + Send {}
+impl<T: core::fmt::Debug + Send + for<'a> CoroState<Vec<WasmValue>, FuncContext<'a>>> HostCoroState for T {}
+
 /// A host function
 pub struct HostFunction {
     pub(crate) ty: tinywasm_types::FuncType,
@@ -41,12 +47,14 @@ impl HostFunction {
     }
 
     /// Call the function
-    pub fn call(&self, ctx: FuncContext<'_>, args: &[WasmValue]) -> Result<Vec<WasmValue>> {
+    pub fn call(&self, ctx: FuncContext<'_>, args: &[WasmValue]) -> Result<InnerHostFunCallOutcome> {
         (self.func)(ctx, args)
     }
 }
 
-pub(crate) type HostFuncInner = Box<dyn Fn(FuncContext<'_>, &[WasmValue]) -> Result<Vec<WasmValue>>>;
+pub(crate) type InnerHostFunCallOutcome = coro::PotentialCoroCallResult<Vec<WasmValue>, Box<dyn HostCoroState>>;
+
+pub(crate) type HostFuncInner = Box<dyn Fn(FuncContext<'_>, &[WasmValue]) -> Result<InnerHostFunCallOutcome>>;
 
 /// The context of a host-function call
 #[derive(Debug)]
@@ -135,11 +143,41 @@ impl Extern {
     }
 
     /// Create a new function import
+    pub fn func_coro(
+        ty: &tinywasm_types::FuncType,
+        func: impl Fn(FuncContext<'_>, &[WasmValue]) -> Result<InnerHostFunCallOutcome> + 'static,
+    ) -> Self {
+        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(func), ty: ty.clone() })))
+    }
+
+    /// Create a new function import
     pub fn func(
         ty: &tinywasm_types::FuncType,
         func: impl Fn(FuncContext<'_>, &[WasmValue]) -> Result<Vec<WasmValue>> + 'static,
     ) -> Self {
-        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(func), ty: ty.clone() })))
+        let wrapper = move |c: FuncContext<'_>, v: &[WasmValue]| -> Result<InnerHostFunCallOutcome> {
+            Ok(InnerHostFunCallOutcome::Return(func(c, v)?))
+        };
+        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(wrapper), ty: ty.clone() })))
+    }
+
+    /// Create a new typed function import
+    pub fn typed_func_coro<P, R>(
+        func: impl Fn(FuncContext<'_>, P) -> Result<coro::PotentialCoroCallResult<R, Box<dyn HostCoroState>>>
+            + 'static,
+    ) -> Self
+    where
+        P: FromWasmValueTuple + ValTypesFromTuple,
+        R: IntoWasmValueTuple + ValTypesFromTuple + Debug,
+    {
+        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue]| -> Result<InnerHostFunCallOutcome> {
+            let args = P::from_wasm_value_tuple(args)?;
+            let result = func(ctx, args)?;
+            Ok(result.map_result(|vals|{vals.into_wasm_value_tuple().to_vec()}))
+        };
+
+        let ty = tinywasm_types::FuncType { params: P::val_types(), results: R::val_types() };
+        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(inner_func), ty })))
     }
 
     /// Create a new typed function import
@@ -148,10 +186,10 @@ impl Extern {
         P: FromWasmValueTuple + ValTypesFromTuple,
         R: IntoWasmValueTuple + ValTypesFromTuple + Debug,
     {
-        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue]| -> Result<Vec<WasmValue>> {
+        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue]| -> Result<InnerHostFunCallOutcome> {
             let args = P::from_wasm_value_tuple(args)?;
             let result = func(ctx, args)?;
-            Ok(result.into_wasm_value_tuple().to_vec())
+            Ok(InnerHostFunCallOutcome::Return(result.into_wasm_value_tuple().to_vec()))
         };
 
         let ty = tinywasm_types::FuncType { params: P::val_types(), results: R::val_types() };

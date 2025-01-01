@@ -2,8 +2,10 @@
 #[allow(unused_imports)]
 use super::no_std_floats::NoStdFloatExt;
 
+use alloc::boxed::Box;
 use alloc::{format, rc::Rc, string::ToString};
 use core::ops::ControlFlow;
+use coro::SuspendReason;
 use interpreter::simd::exec_next_simd;
 use interpreter::stack::CallFrame;
 use tinywasm_types::*;
@@ -13,34 +15,91 @@ use super::stack::{BlockFrame, BlockType, Stack};
 use super::values::*;
 use crate::*;
 
+pub(crate) enum ReasonToBreak {
+    Errored(Error),
+    Suspended(SuspendReason),
+    Finished,
+}
+
+impl From<ReasonToBreak> for ControlFlow<ReasonToBreak> {
+    fn from(value: ReasonToBreak) -> Self {
+        ControlFlow::Break(value)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct SuspendedHostCoroState {
+    pub(crate) coro_state: Box<dyn HostCoroState>,
+    // plug into used in store.get_func to get original function
+    // can be used for checking returned types
+    #[allow(dead_code)] // not implemented yet, but knowing context is useful
+    pub(crate) coro_orig_function: u32,
+}
+
+#[derive(Debug)]
 pub(crate) struct Executor<'store, 'stack> {
     pub(crate) cf: CallFrame,
     pub(crate) module: ModuleInstance,
+    pub(crate) suspended_host_coro: Option<SuspendedHostCoroState>,
     pub(crate) store: &'store mut Store,
     pub(crate) stack: &'stack mut Stack,
 }
+
+pub(crate) type ExecOutcome = coro::CoroStateResumeResult<()>;
 
 impl<'store, 'stack> Executor<'store, 'stack> {
     pub(crate) fn new(store: &'store mut Store, stack: &'stack mut Stack) -> Result<Self> {
         let current_frame = stack.call_stack.pop().expect("no call frame, this is a bug");
         let current_module = store.get_module_instance_raw(current_frame.module_addr());
-        Ok(Self { cf: current_frame, module: current_module, stack, store })
+        Ok(Self { cf: current_frame, module: current_module, suspended_host_coro: None, stack, store })
     }
 
     #[inline(always)]
-    pub(crate) fn run_to_completion(&mut self) -> Result<()> {
+    pub(crate) fn run_to_suspension(&mut self) -> Result<ExecOutcome> {
         loop {
             if let ControlFlow::Break(res) = self.exec_next() {
                 return match res {
-                    Some(e) => Err(e),
-                    None => Ok(()),
+                    ReasonToBreak::Errored(e) => Err(e),
+                    ReasonToBreak::Suspended(suspend_reason) => Ok(ExecOutcome::Suspended(suspend_reason)),
+                    ReasonToBreak::Finished => Ok(ExecOutcome::Return(())),
                 };
             }
         }
     }
 
     #[inline(always)]
-    fn exec_next(&mut self) -> ControlFlow<Option<Error>> {
+    pub(crate) fn resume(&mut self, res_arg: ResumeArgument) -> Result<ExecOutcome> {
+        if let Some(coro_state) = self.suspended_host_coro.as_mut() {
+            let ctx = FuncContext { store: &mut self.store, module_addr: self.module.id() };
+            let host_res = coro_state.coro_state.resume(ctx, res_arg)?;
+            let res = match host_res {
+                CoroStateResumeResult::Return(res) => res,
+                CoroStateResumeResult::Suspended(suspend_reason) => {
+                    return Ok(ExecOutcome::Suspended(suspend_reason));
+                }
+            };
+            self.after_resume_host_coro(&res);
+            self.suspended_host_coro = None;
+        }
+
+        loop {
+            if let ControlFlow::Break(res) = self.exec_next() {
+                return match res {
+                    ReasonToBreak::Errored(e) => Err(e),
+                    ReasonToBreak::Suspended(suspend_reason) => Ok(ExecOutcome::Suspended(suspend_reason)),
+                    ReasonToBreak::Finished => Ok(ExecOutcome::Return(())),
+                };
+            }
+        }
+    }
+
+    fn after_resume_host_coro(&mut self, vals: &[WasmValue]) {
+        self.stack.values.extend_from_wasmvalues(&vals);
+        self.cf.incr_instr_ptr();
+    }
+
+    #[inline(always)]
+    fn exec_next(&mut self) -> ControlFlow<ReasonToBreak> {
         use tinywasm_types::Instruction::*;
         match self.cf.fetch_instr() {
             Nop | BrLabel(_) | I32ReinterpretF32 | I64ReinterpretF64 | F32ReinterpretI32 | F64ReinterpretI64 => {}
@@ -311,11 +370,11 @@ impl<'store, 'stack> Executor<'store, 'stack> {
     }
 
     #[cold]
-    fn exec_unreachable(&self) -> ControlFlow<Option<Error>> {
-        ControlFlow::Break(Some(Trap::Unreachable.into()))
+    fn exec_unreachable(&self) -> ControlFlow<ReasonToBreak> {
+        ReasonToBreak::Errored(Trap::Unreachable.into()).into()
     }
 
-    fn exec_call(&mut self, wasm_func: Rc<WasmFunction>, owner: ModuleInstanceAddr) -> ControlFlow<Option<Error>> {
+    fn exec_call(&mut self, wasm_func: Rc<WasmFunction>, owner: ModuleInstanceAddr) -> ControlFlow<ReasonToBreak> {
         let locals = self.stack.values.pop_locals(wasm_func.params, wasm_func.locals);
         let new_call_frame = CallFrame::new_raw(wasm_func, owner, locals, self.stack.blocks.len() as u32);
         self.cf.incr_instr_ptr(); // skip the call instruction
@@ -323,8 +382,9 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         self.module.swap_with(self.cf.module_addr(), self.store);
         ControlFlow::Continue(())
     }
-    fn exec_call_direct(&mut self, v: u32) -> ControlFlow<Option<Error>> {
-        let func_inst = self.store.get_func(self.module.resolve_func_addr(v));
+    fn exec_call_direct(&mut self, v: u32) -> ControlFlow<ReasonToBreak> {
+        let func_ref = self.module.resolve_func_addr(v);
+        let func_inst = self.store.get_func(func_ref);
         let wasm_func = match &func_inst.func {
             crate::Function::Wasm(wasm_func) => wasm_func,
             crate::Function::Host(host_func) => {
@@ -332,15 +392,24 @@ impl<'store, 'stack> Executor<'store, 'stack> {
                 let params = self.stack.values.pop_params(&host_func.ty.params);
                 let res =
                     (func.func)(FuncContext { store: self.store, module_addr: self.module.id() }, &params).to_cf()?;
-                self.stack.values.extend_from_wasmvalues(&res);
-                self.cf.incr_instr_ptr();
-                return ControlFlow::Continue(());
+                match res {
+                    PotentialCoroCallResult::Return(res) => {
+                        self.stack.values.extend_from_wasmvalues(&res);
+                        self.cf.incr_instr_ptr();
+                        return ControlFlow::Continue(());
+                    }
+                    PotentialCoroCallResult::Suspended(suspend_reason, state) => {
+                        self.suspended_host_coro =
+                            Some(SuspendedHostCoroState { coro_state: state, coro_orig_function: func_ref });
+                        return ReasonToBreak::Suspended(suspend_reason).into();
+                    }
+                }
             }
         };
 
         self.exec_call(wasm_func.clone(), func_inst.owner)
     }
-    fn exec_call_indirect(&mut self, type_addr: u32, table_addr: u32) -> ControlFlow<Option<Error>> {
+    fn exec_call_indirect(&mut self, type_addr: u32, table_addr: u32) -> ControlFlow<ReasonToBreak> {
         // verify that the table is of the right type, this should be validated by the parser already
         let func_ref = {
             let table = self.store.get_table(self.module.resolve_table_addr(table_addr));
@@ -361,10 +430,11 @@ impl<'store, 'stack> Executor<'store, 'stack> {
             crate::Function::Wasm(f) => f,
             crate::Function::Host(host_func) => {
                 if unlikely(host_func.ty != *call_ty) {
-                    return ControlFlow::Break(Some(
+                    return ReasonToBreak::Errored(
                         Trap::IndirectCallTypeMismatch { actual: host_func.ty.clone(), expected: call_ty.clone() }
                             .into(),
-                    ));
+                    )
+                    .into();
                 }
 
                 let host_func = host_func.clone();
@@ -372,19 +442,29 @@ impl<'store, 'stack> Executor<'store, 'stack> {
                 let res =
                     match (host_func.func)(FuncContext { store: self.store, module_addr: self.module.id() }, &params) {
                         Ok(res) => res,
-                        Err(e) => return ControlFlow::Break(Some(e)),
+                        Err(e) => return ReasonToBreak::Errored(e).into(),
                     };
+                match res {
+                    PotentialCoroCallResult::Return(res) => {
+                        self.stack.values.extend_from_wasmvalues(&res);
+                        self.cf.incr_instr_ptr();
+                    }
+                    PotentialCoroCallResult::Suspended(suspend_reason, state) => {
+                        self.suspended_host_coro =
+                            Some(SuspendedHostCoroState { coro_state: state, coro_orig_function: func_ref });
+                        return ReasonToBreak::Suspended(suspend_reason).into();
+                    }
+                }
 
-                self.stack.values.extend_from_wasmvalues(&res);
-                self.cf.incr_instr_ptr();
                 return ControlFlow::Continue(());
             }
         };
 
         if unlikely(wasm_func.ty != *call_ty) {
-            return ControlFlow::Break(Some(
+            return ReasonToBreak::Errored(
                 Trap::IndirectCallTypeMismatch { actual: wasm_func.ty.clone(), expected: call_ty.clone() }.into(),
-            ));
+            )
+            .into();
         }
 
         self.exec_call(wasm_func.clone(), func_inst.owner)
@@ -424,7 +504,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
             ty,
         });
     }
-    fn exec_br(&mut self, to: u32) -> ControlFlow<Option<Error>> {
+    fn exec_br(&mut self, to: u32) -> ControlFlow<ReasonToBreak> {
         if self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks).is_none() {
             return self.exec_return();
         }
@@ -432,7 +512,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         self.cf.incr_instr_ptr();
         ControlFlow::Continue(())
     }
-    fn exec_br_if(&mut self, to: u32) -> ControlFlow<Option<Error>> {
+    fn exec_br_if(&mut self, to: u32) -> ControlFlow<ReasonToBreak> {
         if self.stack.values.pop::<i32>() != 0
             && self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks).is_none()
         {
@@ -441,22 +521,23 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         self.cf.incr_instr_ptr();
         ControlFlow::Continue(())
     }
-    fn exec_brtable(&mut self, default: u32, len: u32) -> ControlFlow<Option<Error>> {
+    fn exec_brtable(&mut self, default: u32, len: u32) -> ControlFlow<ReasonToBreak> {
         let start = self.cf.instr_ptr() + 1;
         let end = start + len as usize;
         if end > self.cf.instructions().len() {
-            return ControlFlow::Break(Some(Error::Other(format!(
+            return ReasonToBreak::Errored(Error::Other(format!(
                 "br_table out of bounds: {} >= {}",
                 end,
                 self.cf.instructions().len()
-            ))));
+            )))
+            .into();
         }
 
         let idx = self.stack.values.pop::<i32>();
         let to = match self.cf.instructions()[start..end].get(idx as usize) {
             None => default,
             Some(Instruction::BrLabel(to)) => *to,
-            _ => return ControlFlow::Break(Some(Error::Other("br_table out of bounds".to_string()))),
+            _ => return ReasonToBreak::Errored(Error::Other("br_table out of bounds".to_string())).into(),
         };
 
         if self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks).is_none() {
@@ -466,10 +547,10 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         self.cf.incr_instr_ptr();
         ControlFlow::Continue(())
     }
-    fn exec_return(&mut self) -> ControlFlow<Option<Error>> {
+    fn exec_return(&mut self) -> ControlFlow<ReasonToBreak> {
         let old = self.cf.block_ptr();
         match self.stack.call_stack.pop() {
-            None => return ControlFlow::Break(None),
+            None => return ReasonToBreak::Finished.into(),
             Some(cf) => self.cf = cf,
         }
 
@@ -615,16 +696,17 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         mem_addr: tinywasm_types::MemAddr,
         offset: u64,
         cast: fn(LOAD) -> TARGET,
-    ) -> ControlFlow<Option<Error>> {
+    ) -> ControlFlow<ReasonToBreak> {
         let mem = self.store.get_mem(self.module.resolve_mem_addr(mem_addr));
         let val = self.stack.values.pop::<i32>() as u64;
         let Some(Ok(addr)) = offset.checked_add(val).map(TryInto::try_into) else {
             cold();
-            return ControlFlow::Break(Some(Error::Trap(Trap::MemoryOutOfBounds {
+            return ReasonToBreak::Errored(Error::Trap(Trap::MemoryOutOfBounds {
                 offset: val as usize,
                 len: LOAD_SIZE,
                 max: 0,
-            })));
+            }))
+            .into();
         };
         let val = mem.load_as::<LOAD_SIZE, LOAD>(addr).to_cf()?;
         self.stack.values.push(cast(val));
@@ -635,13 +717,13 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         mem_addr: tinywasm_types::MemAddr,
         offset: u64,
         cast: fn(T) -> U,
-    ) -> ControlFlow<Option<Error>> {
+    ) -> ControlFlow<ReasonToBreak> {
         let mem = self.store.get_mem_mut(self.module.resolve_mem_addr(mem_addr));
         let val = self.stack.values.pop::<T>();
         let val = (cast(val)).to_mem_bytes();
         let addr = self.stack.values.pop::<i32>() as u64;
         if let Err(e) = mem.store((offset + addr) as usize, val.len(), &val) {
-            return ControlFlow::Break(Some(e));
+            return ReasonToBreak::Errored(e).into();
         }
         ControlFlow::Continue(())
     }

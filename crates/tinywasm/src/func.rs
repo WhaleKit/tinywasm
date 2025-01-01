@@ -1,8 +1,11 @@
+use crate::coro::CoroState;
+use crate::interpreter;
+use crate::interpreter::executor::SuspendedHostCoroState;
 use crate::interpreter::stack::{CallFrame, Stack};
 use crate::{log, unlikely, Function};
 use crate::{Error, FuncContext, Result, Store};
 use alloc::{boxed::Box, format, string::String, string::ToString, vec, vec::Vec};
-use tinywasm_types::{FuncType, ModuleInstanceAddr, ValType, WasmValue};
+use tinywasm_types::{FuncType, ModuleInstanceAddr, ResumeArgument, ValType, WasmValue};
 
 #[derive(Debug)]
 /// A function handle
@@ -15,12 +18,60 @@ pub struct FuncHandle {
     pub name: Option<String>,
 }
 
+pub(crate) type FuncHandleResumeOutcome = crate::coro::CoroStateResumeResult<Vec<WasmValue>>;
+
+#[derive(Debug)]
+struct SuspendedWasmFunc {
+    runtime: interpreter::SuspendedRuntime,
+    result_types: Box<[ValType]>,
+}
+impl SuspendedWasmFunc {
+    fn resume(&mut self, ctx: FuncContext<'_>, arg: ResumeArgument) -> Result<FuncHandleResumeOutcome> {
+        Ok(self.runtime.resume(ctx, arg)?.map_result(|mut stack| stack.values.pop_results(&self.result_types)))
+    }
+}
+
+#[derive(Debug)]
+pub(self) enum SuspendFuncInner {
+    Wasm(SuspendedWasmFunc),
+    Host(SuspendedHostCoroState),
+}
+
+#[derive(Debug)]
+pub struct SuspendFunc {
+    pub(self) func: SuspendFuncInner,
+    pub(crate) module_addr: ModuleInstanceAddr,
+}
+
+impl<'a> crate::coro::CoroState<Vec<WasmValue>, &mut Store> for SuspendFunc {
+    fn resume(&mut self, store: &mut Store, arg: ResumeArgument) -> Result<FuncHandleResumeOutcome> {
+        let ctx = FuncContext { store, module_addr: self.module_addr };
+        match &mut self.func {
+            SuspendFuncInner::Wasm(wasm) => wasm.resume(ctx, arg),
+            SuspendFuncInner::Host(host) => Ok(host.coro_state.resume(ctx, arg)?),
+        }
+    }
+}
+
+type FuncHandleCallOutcome = crate::coro::PotentialCoroCallResult<Vec<WasmValue>, SuspendFunc>;
+
 impl FuncHandle {
     /// Call a function (Invocation)
     ///
     /// See <https://webassembly.github.io/spec/core/exec/modules.html#invocation>
+    ///
+
     #[inline]
     pub fn call(&self, store: &mut Store, params: &[WasmValue]) -> Result<Vec<WasmValue>> {
+        match self.call_coro(store, params)? {
+            crate::coro::PotentialCoroCallResult::Return(res) => Ok(res),
+            crate::coro::PotentialCoroCallResult::Suspended(suspend, _state) => Err(Error::UnexpectedSuspend(suspend)),
+        }
+    }
+
+    /// Call a function (Invocation) and anticipate possible yield instead as well as return
+    #[inline]
+    pub fn call_coro(&self, store: &mut Store, params: &[WasmValue]) -> Result<FuncHandleCallOutcome> {
         // Comments are ordered by the steps in the spec
         // In this implementation, some steps are combined and ordered differently for performance reasons
 
@@ -53,7 +104,13 @@ impl FuncHandle {
             Function::Host(host_func) => {
                 let func = &host_func.clone().func;
                 let ctx = FuncContext { store, module_addr: self.module_addr };
-                return (func)(ctx, params);
+                return Ok((func)(ctx, params)?.map_state(|state| SuspendFunc {
+                    func: SuspendFuncInner::Host(SuspendedHostCoroState {
+                        coro_state: state,
+                        coro_orig_function: self.addr,
+                    }),
+                    module_addr: self.module_addr,
+                }));
             }
             Function::Wasm(wasm_func) => wasm_func,
         };
@@ -63,23 +120,33 @@ impl FuncHandle {
 
         // 7. Push the frame f to the call stack
         // & 8. Push the values to the stack (Not needed since the call frame owns the values)
-        let mut stack = Stack::new(call_frame);
+        let stack = Stack::new(call_frame);
 
         // 9. Invoke the function instance
         let runtime = store.runtime();
-        runtime.exec(store, &mut stack)?;
+        let exec_outcome = runtime.exec(store, stack)?;
+        Ok(exec_outcome
+            .map_result(|mut stack| {
+                // Once the function returns:
+                // let result_m = func_ty.results.len();
 
-        // Once the function returns:
-        // let result_m = func_ty.results.len();
+                // 1. Assert: m values are on the top of the stack (Ensured by validation)
+                // assert!(stack.values.len() >= result_m);
 
-        // 1. Assert: m values are on the top of the stack (Ensured by validation)
-        // assert!(stack.values.len() >= result_m);
-
-        // 2. Pop m values from the stack
-        let res = stack.values.pop_results(&func_ty.results);
-
-        // The values are returned as the results of the invocation.
-        Ok(res)
+                // 2. Pop m values from the stack
+                let res = stack.values.pop_results(&func_ty.results);
+                // The values are returned as the results of the invocation.
+                return res;
+            })
+            .map_state(|coro_state| -> SuspendFunc {
+                SuspendFunc {
+                    func: SuspendFuncInner::Wasm(SuspendedWasmFunc {
+                        runtime: coro_state,
+                        result_types: func_ty.results.clone(),
+                    }),
+                    module_addr: self.module_addr,
+                }
+            }))
     }
 }
 
