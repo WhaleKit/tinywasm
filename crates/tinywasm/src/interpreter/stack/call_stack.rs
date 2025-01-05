@@ -107,12 +107,13 @@ impl CallFrame {
         break_to_relative: u32,
         values: &mut super::ValueStack,
         blocks: &mut super::BlockStack,
-    ) -> Option<()> {
+    ) -> Option<BlockType> {
         let break_to = blocks.get_relative_to(break_to_relative, self.block_ptr)?;
-        
+
+        let block_ty = break_to.ty;
         // instr_ptr points to the label instruction, but the next step
         // will increment it by 1 since we're changing the "current" instr_ptr
-        match break_to.ty {
+        match block_ty {
             BlockType::Loop => {
                 // this is a loop, so we want to jump back to the start of the loop
                 self.instr_ptr = break_to.instr_ptr;
@@ -124,7 +125,7 @@ impl CallFrame {
                 if break_to_relative != 0 {
                     // we also want to trim the label stack to the loop (but not including the loop)
                     blocks.truncate(blocks.len() as u32 - break_to_relative);
-                    return Some(());
+                    return Some(BlockType::Loop);
                 }
             }
 
@@ -141,7 +142,7 @@ impl CallFrame {
             }
         }
 
-        Some(())
+        Some(block_ty)
     }
 
     #[inline]

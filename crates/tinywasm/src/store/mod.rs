@@ -1,5 +1,6 @@
 use alloc::{boxed::Box, format, string::ToString, vec::Vec};
 use core::fmt::Debug;
+use core::ops::ControlFlow;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use tinywasm_types::*;
 
@@ -33,6 +34,8 @@ pub struct Store {
 
     pub(crate) data: StoreData,
     pub(crate) runtime: Runtime,
+    // idk where to put it, but here it's accessible to host functions without modifying their signature
+    pub(crate) suspend_cond: SuspendConditions,
 }
 
 impl Debug for Store {
@@ -83,7 +86,13 @@ impl PartialEq for Store {
 impl Default for Store {
     fn default() -> Self {
         let id = STORE_ID.fetch_add(1, Ordering::Relaxed);
-        Self { id, module_instances: Vec::new(), data: StoreData::default(), runtime: Runtime::Default }
+        Self {
+            id,
+            module_instances: Vec::new(),
+            data: StoreData::default(),
+            runtime: Runtime::Default,
+            suspend_cond: SuspendConditions::default(),
+        }
     }
 }
 
@@ -470,4 +479,53 @@ fn get_pair_mut<T>(slice: &mut [T], i: usize, j: usize) -> Option<(&mut T, &mut 
     let (_, y) = rest.split_at_mut(second - first - 1);
     let pair = if i < j { (&mut x[0], &mut y[0]) } else { (&mut y[0], &mut x[0]) };
     Some(pair)
+}
+
+// idk where really to put it, but it should be accessible to host environment (obviously)
+// and, less obviously, to host functions called from it, for calling wasm callbacks and propagating this config to them
+// or just complying with suspend conditions
+/// used to limit when how much cpu time wasm code should take
+#[derive(Default)]
+pub struct SuspendConditions {
+    /// atomic flag. when set to true it means execution should suspend
+    /// can be used to tell executor to stop from another thread
+    pub suspend_flag: Option<alloc::sync::Arc<core::sync::atomic::AtomicBool>>,
+
+    /// instant at which execution should suspend
+    /// can be used to control how much time will be spent in wasm without requiring other threads
+    /// such as for time-slice multitasking
+    #[cfg(feature = "std")]
+    pub timeout_instant: Option<crate::std::time::Instant>,
+
+    /// callback that returns [`ControlFlow::Break`]` when execution should suspend
+    /// can be used when above methods are insufficient or
+    /// instead of [`timeout_instant`] in no-std builds if you have a clock function
+    pub suspend_cb: Option<Box<dyn FnMut(&Store) -> ControlFlow<(), ()>>>,
+}
+
+impl Debug for SuspendConditions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let stop_cb_text = if self.suspend_cb.is_some() { "<present>" } else { "<not present>" };
+        f.debug_struct("SuspendConditions")
+            .field("stop_flag", &self.suspend_flag)
+            .field("timeout_instant", &self.timeout_instant)
+            .field("stop_cb", &stop_cb_text)
+            .finish()
+    }
+}
+
+impl Store {
+    /// sets suspend conditions for store
+    pub fn set_suspend_conditions(&mut self, val: SuspendConditions) {
+        self.suspend_cond = val;
+    }
+    /// gets suspend conditions of store
+    pub fn get_suspend_conditions(&self) -> &SuspendConditions {
+        &self.suspend_cond
+    }
+    /// transforms suspend conditions for store using user-provided function
+    pub fn update_suspend_conditions(&mut self, replacer: impl FnOnce(SuspendConditions) -> SuspendConditions) {
+        let temp = core::mem::replace(&mut self.suspend_cond, SuspendConditions::default());
+        self.suspend_cond = replacer(temp);
+    }
 }

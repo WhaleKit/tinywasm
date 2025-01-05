@@ -4,18 +4,26 @@ use crate::Result;
 // use alloc::boxed::Box;
 pub(crate) use tinywasm_types::{ResumeArgument, YieldedValue};
 
+
+/// explains why did execution suspend, and carries payload if needed
 #[derive(Debug)]
 pub enum SuspendReason {
     /// host function yielded
     /// potentially some host functions might expect resume argument when calling resume
     Yield(YieldedValue),
-    // /// timer ran out (not implemented),
-    // /// host shouldn't provide resume argument when calling resume
-    // SuspendedEpoch,
 
-    // /// async should_suspend flag was set (not implemented)
-    // /// host shouldn't provide resume argument when calling resume
-    // SuspendedFlag,
+    /// time to suspend has come,
+    /// host shouldn't provide resume argument when calling resume
+    #[cfg(feature = "std")]
+    SuspendedEpoch,
+
+    /// user's should-suspend-callback,
+    /// host shouldn't provide resume argument when calling resume
+    SuspendedCallback,
+
+    /// async should_suspend flag was set
+    /// host shouldn't provide resume argument when calling resume
+    SuspendedFlag,
 }
 
 /// result of a function that might pause in the middle and yield

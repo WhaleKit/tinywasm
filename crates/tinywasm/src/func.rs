@@ -37,14 +37,20 @@ pub(self) enum SuspendFuncInner {
     Host(SuspendedHostCoroState),
 }
 
+/// handle to function that was suspended and can be resumed
 #[derive(Debug)]
 pub struct SuspendFunc {
-    pub(self) func: SuspendFuncInner,
-    pub(crate) module_addr: ModuleInstanceAddr,
+    func: SuspendFuncInner,
+    module_addr: ModuleInstanceAddr,
+    store_id: usize,
 }
 
 impl<'a> crate::coro::CoroState<Vec<WasmValue>, &mut Store> for SuspendFunc {
     fn resume(&mut self, store: &mut Store, arg: ResumeArgument) -> Result<FuncHandleResumeOutcome> {
+        if store.id() != self.store_id {
+            return Err(Error::InvalidStore);
+        }
+
         let ctx = FuncContext { store, module_addr: self.module_addr };
         match &mut self.func {
             SuspendFuncInner::Wasm(wasm) => wasm.resume(ctx, arg),
@@ -110,6 +116,7 @@ impl FuncHandle {
                         coro_orig_function: self.addr,
                     }),
                     module_addr: self.module_addr,
+                    store_id: store.id(),
                 }));
             }
             Function::Wasm(wasm_func) => wasm_func,
@@ -145,6 +152,7 @@ impl FuncHandle {
                         result_types: func_ty.results.clone(),
                     }),
                     module_addr: self.module_addr,
+                    store_id: store.id(),
                 }
             }))
     }
