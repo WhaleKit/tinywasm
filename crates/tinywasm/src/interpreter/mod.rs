@@ -50,6 +50,7 @@ impl<'a> coro::CoroState<stack::Stack, FuncContext<'a>> for SuspendedRuntime {
         ctx: FuncContext<'a>,
         arg: ResumeArgument,
     ) -> Result<coro::CoroStateResumeResult<stack::Stack>> {
+        // should be put back into self.body unless we're finished
         let (body, mut stack) = if let Some(body_) = self.body.take() {
             body_
         } else {
@@ -66,7 +67,10 @@ impl<'a> coro::CoroState<stack::Stack, FuncContext<'a>> for SuspendedRuntime {
         };
         match resumed {
             executor::ExecOutcome::Return(()) => Ok(coro::CoroStateResumeResult::Return(stack)),
-            executor::ExecOutcome::Suspended(suspend) => Ok(coro::CoroStateResumeResult::Suspended(suspend)),
+            executor::ExecOutcome::Suspended(suspend) => {
+                self.body = Some((Self::unmake_exec(exec), stack));
+                Ok(coro::CoroStateResumeResult::Suspended(suspend))
+            }
         }
     }
 }
