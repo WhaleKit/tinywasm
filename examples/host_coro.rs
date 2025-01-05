@@ -74,10 +74,10 @@ fn main() -> eyre::Result<()> {
     let greeter = instance.exported_func_untyped(&store, "call_hello")?;
     let call_res = greeter.call_coro(&mut store, &[])?;
     let mut resumable = match call_res {
-        tinywasm::PotentialCoroCallResult::Return(..) => bail!("it was supposed to return"),
+        tinywasm::PotentialCoroCallResult::Return(..) => bail!("it's supposed to return"),
         tinywasm::PotentialCoroCallResult::Suspended(SuspendReason::Yield(Some(val)), resumable) => {
             match val.downcast::<MyUserData>() {
-                Ok(val) => assert_eq!( val.magic, 42 ),
+                Ok(val) => assert_eq!(val.magic, 42),
                 Err(_) => bail!("invalid yielded val"),
             }
             resumable
