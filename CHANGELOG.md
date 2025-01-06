@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed archive **no_std** support which was broken in the previous release, and added more tests to ensure it stays working
+- Check returns in untyped host functions ([#27](https://github.com/explodingcamera/tinywasm/pull/27)) (thanks [@WhaleKit](https://github.com/WhaleKit))
 
 ## [0.8.0] - 2024-08-29
 

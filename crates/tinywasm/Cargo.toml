@@ -23,6 +23,7 @@ libm={version="0.2", default-features=false}
 wasm-testsuite={version="0.4.0"}
 indexmap="2.7"
 wast={workspace=true}
+wat={workspace=true}
 eyre={workspace=true}
 pretty_env_logger={workspace=true}
 criterion={workspace=true}

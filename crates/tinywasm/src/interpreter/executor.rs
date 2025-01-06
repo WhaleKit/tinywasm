@@ -331,7 +331,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
                 let func = &host_func.clone();
                 let params = self.stack.values.pop_params(&host_func.ty.params);
                 let res =
-                    (func.func)(FuncContext { store: self.store, module_addr: self.module.id() }, &params).to_cf()?;
+                    func.call(FuncContext { store: self.store, module_addr: self.module.id() }, &params).to_cf()?;
                 self.stack.values.extend_from_wasmvalues(&res);
                 self.cf.incr_instr_ptr();
                 return ControlFlow::Continue(());
@@ -370,7 +370,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
                 let host_func = host_func.clone();
                 let params = self.stack.values.pop_params(&host_func.ty.params);
                 let res =
-                    match (host_func.func)(FuncContext { store: self.store, module_addr: self.module.id() }, &params) {
+                    match host_func.call(FuncContext { store: self.store, module_addr: self.module.id() }, &params) {
                         Ok(res) => res,
                         Err(e) => return ControlFlow::Break(Some(e)),
                     };

@@ -1,4 +1,5 @@
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::{fmt::Display, ops::ControlFlow};
 use tinywasm_types::FuncType;
 
@@ -20,8 +21,13 @@ pub enum Error {
     /// An unknown error occurred
     Other(String),
 
-    /// A function did not return a value
-    FuncDidNotReturn,
+    /// A host function returned an invalid value
+    InvalidHostFnReturn {
+        /// The expected type
+        expected: FuncType,
+        /// The actual value
+        actual: Vec<tinywasm_types::WasmValue>,
+    },
 
     /// An invalid label type was encountered
     InvalidLabelType,
@@ -183,7 +189,9 @@ impl Display for Error {
             Self::InvalidLabelType => write!(f, "invalid label type"),
             Self::Other(message) => write!(f, "unknown error: {message}"),
             Self::UnsupportedFeature(feature) => write!(f, "unsupported feature: {feature}"),
-            Self::FuncDidNotReturn => write!(f, "function did not return"),
+            Self::InvalidHostFnReturn { expected, actual } => {
+                write!(f, "invalid host function return: expected={expected:?}, actual={actual:?}")
+            }
             Self::InvalidStore => write!(f, "invalid store"),
         }
     }
