@@ -1,5 +1,5 @@
 use super::{FuncAddr, GlobalAddr, LabelAddr, LocalAddr, TableAddr, TypeAddr, ValType};
-use crate::{ConstIdx, DataAddr, ElemAddr, MemAddr};
+use crate::{ConstIdx, DataAddr, ElemAddr, ExternAddr, MemAddr};
 
 /// Represents a memory immediate in a WebAssembly memory instruction.
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -37,8 +37,8 @@ pub enum ConstInstruction {
     F32Const(f32),
     F64Const(f64),
     GlobalGet(GlobalAddr),
-    RefNull(ValType),
-    RefFunc(FuncAddr),
+    RefFunc(Option<FuncAddr>),
+    RefExtern(Option<ExternAddr>),
 }
 
 /// A WebAssembly Instruction

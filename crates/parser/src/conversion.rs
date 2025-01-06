@@ -251,8 +251,12 @@ pub(crate) fn process_const_operators(ops: OperatorsReader<'_>) -> Result<ConstI
     assert!(matches!(ops[ops.len() - 1], wasmparser::Operator::End));
 
     match &ops[ops.len() - 2] {
-        wasmparser::Operator::RefNull { hty } => Ok(ConstInstruction::RefNull(convert_heaptype(*hty))),
-        wasmparser::Operator::RefFunc { function_index } => Ok(ConstInstruction::RefFunc(*function_index)),
+        wasmparser::Operator::RefNull { hty } => match convert_heaptype(*hty) {
+            ValType::RefFunc => Ok(ConstInstruction::RefFunc(None)),
+            ValType::RefExtern => Ok(ConstInstruction::RefExtern(None)),
+            _ => unimplemented!("Unsupported heap type: {:?}", hty),
+        },
+        wasmparser::Operator::RefFunc { function_index } => Ok(ConstInstruction::RefFunc(Some(*function_index))),
         wasmparser::Operator::I32Const { value } => Ok(ConstInstruction::I32Const(*value)),
         wasmparser::Operator::I64Const { value } => Ok(ConstInstruction::I64Const(*value)),
         wasmparser::Operator::F32Const { value } => Ok(ConstInstruction::F32Const(f32::from_bits(value.bits()))),

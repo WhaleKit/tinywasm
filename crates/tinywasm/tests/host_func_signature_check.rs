@@ -4,6 +4,7 @@ use tinywasm::{
     types::{FuncType, ValType, WasmValue},
     Extern, FuncContext, Imports, Module, Store,
 };
+use tinywasm_types::ExternRef;
 
 const VAL_LISTS: &[&[WasmValue]] = &[
     &[],
@@ -11,7 +12,7 @@ const VAL_LISTS: &[&[WasmValue]] = &[
     &[WasmValue::I32(0), WasmValue::I32(0)],                      // 2 of the same
     &[WasmValue::I32(0), WasmValue::I32(0), WasmValue::F64(0.0)], // add another type
     &[WasmValue::I32(0), WasmValue::F64(0.0), WasmValue::I32(0)], // reorder
-    &[WasmValue::RefExtern(0), WasmValue::F64(0.0), WasmValue::I32(0)], // all different types
+    &[WasmValue::RefExtern(ExternRef::null()), WasmValue::F64(0.0), WasmValue::I32(0)], // all different types
 ];
 // (f64, i32, i32) and (f64) can be used to "match_none"
 
@@ -37,7 +38,6 @@ fn test_return_invalid_type() -> Result<()> {
 
     for (module, func_ty, test_args) in mod_list {
         for result_to_try in VAL_LISTS {
-            println!("trying");
             let mut store = Store::default();
             let mut imports = Imports::new();
             imports
@@ -146,7 +146,6 @@ fn proxy_module(func_ty: &FuncType) -> Module {
     let results_text = join_surround(results, "result");
     let params_text = join_surround(params, "param");
 
-    // let params_gets: String = params.iter().enumerate().map(|(num, _)| format!("(local.get {num})\n")).collect();
     let params_gets: String = params.iter().enumerate().fold(String::new(), |mut acc, (num, _)| {
         let _ = writeln!(acc, "(local.get {num})", num = num);
         acc

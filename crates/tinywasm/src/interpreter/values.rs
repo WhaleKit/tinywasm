@@ -1,5 +1,5 @@
 use crate::Result;
-use tinywasm_types::{LocalAddr, ValType, WasmValue};
+use tinywasm_types::{ExternRef, FuncRef, LocalAddr, ValType, WasmValue};
 
 use super::stack::{Locals, ValueStack};
 
@@ -107,14 +107,8 @@ impl TinyWasmValue {
             ValType::F32 => WasmValue::F32(f32::from_bits(self.unwrap_32())),
             ValType::F64 => WasmValue::F64(f64::from_bits(self.unwrap_64())),
             ValType::V128 => WasmValue::V128(self.unwrap_128()),
-            ValType::RefExtern => match self.unwrap_ref() {
-                Some(v) => WasmValue::RefExtern(v),
-                None => WasmValue::RefNull(ValType::RefExtern),
-            },
-            ValType::RefFunc => match self.unwrap_ref() {
-                Some(v) => WasmValue::RefFunc(v),
-                None => WasmValue::RefNull(ValType::RefFunc),
-            },
+            ValType::RefExtern => WasmValue::RefExtern(ExternRef::new(self.unwrap_ref())),
+            ValType::RefFunc => WasmValue::RefFunc(FuncRef::new(self.unwrap_ref())),
         }
     }
 }
@@ -127,8 +121,8 @@ impl From<&WasmValue> for TinyWasmValue {
             WasmValue::V128(v) => TinyWasmValue::Value128(*v),
             WasmValue::F32(v) => TinyWasmValue::Value32(v.to_bits()),
             WasmValue::F64(v) => TinyWasmValue::Value64(v.to_bits()),
-            WasmValue::RefFunc(v) | WasmValue::RefExtern(v) => TinyWasmValue::ValueRef(Some(*v)),
-            WasmValue::RefNull(_) => TinyWasmValue::ValueRef(None),
+            WasmValue::RefExtern(v) => TinyWasmValue::ValueRef(v.addr()),
+            WasmValue::RefFunc(v) => TinyWasmValue::ValueRef(v.addr()),
         }
     }
 }
