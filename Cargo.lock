@@ -698,6 +698,7 @@ dependencies = [
  "tinywasm-types",
  "wasm-testsuite",
  "wast",
+ "wat",
 ]
 
 [[package]]

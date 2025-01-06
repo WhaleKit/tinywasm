@@ -1,9 +1,9 @@
 use eyre::Result;
+use std::fmt::Write;
 use tinywasm::{
     types::{FuncType, ValType, WasmValue},
     Extern, FuncContext, Imports, Module, Store,
 };
-use wat;
 
 const VAL_LISTS: &[&[WasmValue]] = &[
     &[],
@@ -13,7 +13,7 @@ const VAL_LISTS: &[&[WasmValue]] = &[
     &[WasmValue::I32(0), WasmValue::F64(0.0), WasmValue::I32(0)], // reorder
     &[WasmValue::RefExtern(0), WasmValue::F64(0.0), WasmValue::I32(0)], // all different types
 ];
-//(f64, i32, i32) and (f64) can be used to "match_none"
+// (f64, i32, i32) and (f64) can be used to "match_none"
 
 fn get_type_lists() -> impl Iterator<Item = impl Iterator<Item = ValType> + Clone> + Clone {
     VAL_LISTS.iter().map(|l| l.iter().map(WasmValue::val_type))
@@ -24,7 +24,7 @@ fn get_modules() -> Vec<(Module, FuncType, Vec<WasmValue>)> {
     for res_types in get_type_lists() {
         for (arg_types, arg_vals) in val_and_tys.clone() {
             let ty = FuncType { results: res_types.clone().collect(), params: arg_types.collect() };
-            result.push((proxy_module(&ty), ty, arg_vals.iter().cloned().collect()));
+            result.push((proxy_module(&ty), ty, arg_vals.to_vec()));
         }
     }
     result
@@ -64,9 +64,9 @@ fn test_return_invalid_type() -> Result<()> {
 fn test_linking_invalid_untyped_func() -> Result<()> {
     // try to import host functions with function types no matching those expected by modules
     let mod_list = get_modules();
-    for (module, actual_func_ty,_) in &mod_list {
-        for (_, func_ty_to_try,_) in &mod_list {
-            let tried_fn = Extern::func(&func_ty_to_try, |_: FuncContext<'_>, _| panic!("not intended to be called"));
+    for (module, actual_func_ty, _) in &mod_list {
+        for (_, func_ty_to_try, _) in &mod_list {
+            let tried_fn = Extern::func(func_ty_to_try, |_: FuncContext<'_>, _| panic!("not intended to be called"));
             let mut store = Store::default();
             let mut imports = Imports::new();
             imports.define("host", "hfn", tried_fn).unwrap();
@@ -107,11 +107,12 @@ fn test_linking_invalid_typed_func() -> Result<()> {
         for typed_fn in matching_none.clone() {
             let mut store = Store::default();
             let mut imports = Imports::new();
-            imports.define("host", "hfn", typed_fn.clone()).unwrap();
+            imports.define("host", "hfn", typed_fn).unwrap();
             let link_failure = module.clone().instantiate(&mut store, Some(imports));
             link_failure.expect_err("no func in matching_none list should link to any mod");
         }
     }
+
     // the valid cases are well-checked in other tests
     Ok(())
 }
@@ -145,7 +146,11 @@ fn proxy_module(func_ty: &FuncType) -> Module {
     let results_text = join_surround(results, "result");
     let params_text = join_surround(params, "param");
 
-    let params_gets: String = params.iter().enumerate().map(|(num, _)| format!("(local.get {num})\n")).collect();
+    // let params_gets: String = params.iter().enumerate().map(|(num, _)| format!("(local.get {num})\n")).collect();
+    let params_gets: String = params.iter().enumerate().fold(String::new(), |mut acc, (num, _)| {
+        let _ = writeln!(acc, "(local.get {num})", num = num);
+        acc
+    });
 
     let result_drops = "(drop)\n".repeat(results.len()).to_string();
     let wasm_text = format!(
@@ -164,6 +169,5 @@ fn proxy_module(func_ty: &FuncType) -> Module {
     "#
     );
     let wasm = wat::parse_str(wasm_text).expect("failed to parse wat");
-    let res = Module::parse_bytes(&wasm).expect("failed to make module");
-    res
+    Module::parse_bytes(&wasm).expect("failed to make module")
 }

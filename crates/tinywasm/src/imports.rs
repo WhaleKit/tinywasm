@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 
 use crate::func::{FromWasmValueTuple, IntoWasmValueTuple, ValTypesFromTuple};
-use crate::{cold, log, Error, LinkingError, MemoryRef, MemoryRefMut, Result};
+use crate::{log, LinkingError, MemoryRef, MemoryRefMut, Result};
 use tinywasm_types::*;
 
 /// The internal representation of a function
@@ -42,12 +42,11 @@ impl HostFunction {
 
     /// Call the function
     pub fn call(&self, ctx: FuncContext<'_>, args: &[WasmValue]) -> Result<Vec<WasmValue>> {
-        (self.func)(ctx, args, &self.ty.results)
+        (self.func)(ctx, args)
     }
 }
 
-// third argument - expected return types, for validation
-pub(crate) type HostFuncInner = Box<dyn Fn(FuncContext<'_>, &[WasmValue], &[ValType]) -> Result<Vec<WasmValue>>>;
+pub(crate) type HostFuncInner = Box<dyn Fn(FuncContext<'_>, &[WasmValue]) -> Result<Vec<WasmValue>>>;
 
 /// The context of a host-function call
 #[derive(Debug)]
@@ -140,19 +139,26 @@ impl Extern {
         ty: &tinywasm_types::FuncType,
         func: impl Fn(FuncContext<'_>, &[WasmValue]) -> Result<Vec<WasmValue>> + 'static,
     ) -> Self {
-        let wrapper = move |ctx: FuncContext<'_>, params: &[WasmValue], res_ty: &[ValType]| {
-            let ret = func(ctx, params)?;
-            let types_match = res_ty.iter().cloned().eq(ret.iter().map(WasmValue::val_type));
-            if types_match {
-                Ok(ret)
-            } else {
-                cold();
-                let got_types = ret.iter().map(WasmValue::val_type).collect::<Box<[_]>>();
-                log::error!("Return from host function type mismatch: expected {:?}, got {:?}", res_ty, got_types);
-                Err(Error::InvalidHostFnReturn)
-            }
+        let _ty = ty.clone();
+        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue]| -> Result<Vec<WasmValue>> {
+            let _ty = _ty.clone();
+            let result = func(ctx, args)?;
+
+            if result.len() != _ty.results.len() {
+                return Err(crate::Error::InvalidHostFnReturn { expected: _ty.clone(), actual: result });
+            };
+
+            result.iter().zip(_ty.results.iter()).try_for_each(|(val, ty)| {
+                if val.val_type() != *ty {
+                    return Err(crate::Error::InvalidHostFnReturn { expected: _ty.clone(), actual: result.clone() });
+                }
+                Ok(())
+            })?;
+
+            Ok(result)
         };
-        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(wrapper), ty: ty.clone() })))
+
+        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(inner_func), ty: ty.clone() })))
     }
 
     /// Create a new typed function import
@@ -161,7 +167,7 @@ impl Extern {
         P: FromWasmValueTuple + ValTypesFromTuple,
         R: IntoWasmValueTuple + ValTypesFromTuple + Debug,
     {
-        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue], _: &[ValType]| -> Result<Vec<WasmValue>> {
+        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue]| -> Result<Vec<WasmValue>> {
             let args = P::from_wasm_value_tuple(args)?;
             let result = func(ctx, args)?;
             Ok(result.into_wasm_value_tuple().to_vec())
