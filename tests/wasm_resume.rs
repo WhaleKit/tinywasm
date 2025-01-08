@@ -12,6 +12,7 @@ use tinywasm::{
 use tinywasm::{Extern, Imports};
 use wat;
 
+#[test]
 fn main() -> std::result::Result<(), eyre::Report> {
     println!("\n# testing with callback");
     let mut cb_cond = |store: &mut Store| {
