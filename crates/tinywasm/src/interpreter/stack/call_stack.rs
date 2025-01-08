@@ -101,6 +101,12 @@ impl CallFrame {
 
     /// Break to a block at the given index (relative to the current frame)
     /// Returns `None` if there is no block at the given index (e.g. if we need to return, this is handled by the caller)
+    /// otherwise returns type if block it broke to
+    /// <div class="warning">
+    ///     if it returned Some (broke to block),
+    ///     it expects caller to increment instruction pointer after calling it:
+    ///     otherwise caller might exit block that's already exited or inter block caller's already in
+    /// </div>
     #[inline]
     pub(crate) fn break_to(
         &mut self,

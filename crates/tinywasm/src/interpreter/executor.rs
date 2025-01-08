@@ -104,6 +104,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
     /// can mutliply time spent in execution
     /// execution may not be suspended in the middle of execution the funcion:
     /// so only do it as the last thing or first thing in the intsruction execution
+    #[must_use = "If this returns ControlFlow::Break, the caller should propagate it"]
     fn check_should_suspend(&mut self) -> ControlFlow<ReasonToBreak> {
         if let Some(flag) = &self.store.suspend_cond.suspend_flag {
             if flag.load(core::sync::atomic::Ordering::Acquire) {
@@ -522,28 +523,34 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         });
     }
     fn exec_br(&mut self, to: u32) -> ControlFlow<ReasonToBreak> {
-        let break_type = if let Some(bl_ty) = self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks) {
-            bl_ty
-        } else {
+        let block_ty = self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks);
+        if block_ty.is_none() {
             return self.exec_return();
+        }
+        
+        self.cf.incr_instr_ptr();
+
+        if matches!(block_ty, Some(BlockType::Loop)){
+            self.check_should_suspend()?;
+        }
+        ControlFlow::Continue(())
+    }
+    fn exec_br_if(&mut self, to: u32) -> ControlFlow<ReasonToBreak> {
+        let should_check_suspend = if self.stack.values.pop::<i32>() != 0 {
+            // condition says we should break
+            let block_ty = self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks);
+            if block_ty.is_none() {
+                return self.exec_return();
+            }
+            matches!(block_ty, Some(BlockType::Loop))
+        } else {
+            // condition says we shouldn't break
+            false
         };
 
         self.cf.incr_instr_ptr();
 
-        if matches!(break_type, BlockType::Loop) {
-            self.check_should_suspend()?;
-        }
-
-        ControlFlow::Continue(())
-    }
-    fn exec_br_if(&mut self, to: u32) -> ControlFlow<ReasonToBreak> {
-        let break_type = self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks);
-        if self.stack.values.pop::<i32>() != 0 && break_type.is_none() {
-            return self.exec_return();
-        }
-        self.cf.incr_instr_ptr();
-
-        if matches!(break_type, Some(BlockType::Loop)) {
+        if should_check_suspend {
             self.check_should_suspend()?;
         }
         ControlFlow::Continue(())
@@ -567,19 +574,16 @@ impl<'store, 'stack> Executor<'store, 'stack> {
             _ => return ReasonToBreak::Errored(Error::Other("br_table out of bounds".to_string())).into(),
         };
 
-        let break_type = self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks);
-        let break_type = if let Some(br_ty) = break_type {
-            br_ty
-        } else {
+        let block_ty = self.cf.break_to(to, &mut self.stack.values, &mut self.stack.blocks);
+        if block_ty.is_none() {
             return self.exec_return();
-        };
+        }
 
         self.cf.incr_instr_ptr();
 
-        if matches!(break_type, BlockType::Loop) {
+        if matches!(block_ty, Some(BlockType::Loop)){
             self.check_should_suspend()?;
         }
-
         ControlFlow::Continue(())
     }
     fn exec_return(&mut self) -> ControlFlow<ReasonToBreak> {
