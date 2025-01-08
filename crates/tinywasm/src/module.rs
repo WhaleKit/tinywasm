@@ -47,6 +47,7 @@ impl Module {
     /// Instantiate the module in the given store
     ///
     /// Runs the start function if it exists
+    ///
     /// If you want to run the start function yourself, use `ModuleInstance::instantiate`
     ///
     /// See <https://webassembly.github.io/spec/core/exec/modules.html#exec-instantiation>

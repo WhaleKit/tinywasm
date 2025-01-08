@@ -417,7 +417,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
     fn exec_call_host(&mut self, host_func: Rc<HostFunction>, func_ref: u32) -> ControlFlow<ReasonToBreak> {
         let params = self.stack.values.pop_params(&host_func.ty.params);
         let res =
-            (host_func.func)(FuncContext { store: self.store, module_addr: self.module.id() }, &params).to_cf()?;
+            host_func.call(FuncContext { store: self.store, module_addr: self.module.id() }, &params).to_cf()?;
         match res {
             PotentialCoroCallResult::Return(res) => {
                 self.stack.values.extend_from_wasmvalues(&res);

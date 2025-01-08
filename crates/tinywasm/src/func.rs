@@ -5,7 +5,7 @@ use crate::interpreter::stack::{CallFrame, Stack};
 use crate::{log, unlikely, Function};
 use crate::{Error, FuncContext, Result, Store};
 use alloc::{boxed::Box, format, string::String, string::ToString, vec, vec::Vec};
-use tinywasm_types::{FuncType, ModuleInstanceAddr, ResumeArgument, ValType, WasmValue};
+use tinywasm_types::{ExternRef, FuncRef, FuncType, ModuleInstanceAddr, ResumeArgument, ValType, WasmValue};
 
 #[derive(Debug)]
 /// A function handle
@@ -108,9 +108,9 @@ impl FuncHandle {
         let func_inst = store.get_func(self.addr);
         let wasm_func = match &func_inst.func {
             Function::Host(host_func) => {
-                let func = &host_func.clone().func;
+                let host_func = host_func.clone();
                 let ctx = FuncContext { store, module_addr: self.module_addr };
-                return Ok((func)(ctx, params)?.map_state(|state| SuspendFunc {
+                return Ok(host_func.call(ctx, params)?.map_state(|state| SuspendFunc {
                     func: SuspendFuncInner::Host(SuspendedHostCoroState {
                         coro_state: state,
                         coro_orig_function: self.addr,
@@ -294,6 +294,18 @@ impl ToValType for f64 {
     }
 }
 
+impl ToValType for FuncRef {
+    fn to_val_type() -> ValType {
+        ValType::RefFunc
+    }
+}
+
+impl ToValType for ExternRef {
+    fn to_val_type() -> ValType {
+        ValType::RefExtern
+    }
+}
+
 macro_rules! impl_val_types_from_tuple {
     ($($t:ident),+) => {
         impl<$($t),+> ValTypesFromTuple for ($($t,)+)
@@ -326,11 +338,15 @@ impl_from_wasm_value_tuple_single!(i32);
 impl_from_wasm_value_tuple_single!(i64);
 impl_from_wasm_value_tuple_single!(f32);
 impl_from_wasm_value_tuple_single!(f64);
+impl_from_wasm_value_tuple_single!(FuncRef);
+impl_from_wasm_value_tuple_single!(ExternRef);
 
 impl_into_wasm_value_tuple_single!(i32);
 impl_into_wasm_value_tuple_single!(i64);
 impl_into_wasm_value_tuple_single!(f32);
 impl_into_wasm_value_tuple_single!(f64);
+impl_into_wasm_value_tuple_single!(FuncRef);
+impl_into_wasm_value_tuple_single!(ExternRef);
 
 impl_val_types_from_tuple!(T1);
 impl_val_types_from_tuple!(T1, T2);

@@ -1,8 +1,9 @@
 use std::panic::{self, AssertUnwindSafe};
 
 use eyre::{bail, eyre, Result};
-use tinywasm_types::{ModuleInstanceAddr, TinyWasmModule, ValType, WasmValue};
-use wast::{core::AbstractHeapType, QuoteWat};
+use tinywasm_types::{ExternRef, FuncRef, ModuleInstanceAddr, TinyWasmModule, ValType, WasmValue};
+use wasm_testsuite::wast;
+use wasm_testsuite::wast::{core::AbstractHeapType, QuoteWat};
 
 pub fn try_downcast_panic(panic: Box<dyn std::any::Any + Send>) -> String {
     let info = panic.downcast_ref::<panic::PanicHookInfo>().or(None).map(ToString::to_string).clone();
@@ -102,13 +103,13 @@ fn wastarg2tinywasmvalue(arg: wast::WastArg) -> Result<tinywasm_types::WasmValue
         I32(i) => WasmValue::I32(i),
         I64(i) => WasmValue::I64(i),
         V128(i) => WasmValue::V128(i128::from_le_bytes(i.to_le_bytes()).try_into().unwrap()),
-        RefExtern(v) => WasmValue::RefExtern(v),
+        RefExtern(v) => WasmValue::RefExtern(ExternRef::new(Some(v))),
         RefNull(t) => match t {
             wast::core::HeapType::Abstract { shared: false, ty: AbstractHeapType::Func } => {
-                WasmValue::RefNull(ValType::RefFunc)
+                WasmValue::RefFunc(FuncRef::null())
             }
             wast::core::HeapType::Abstract { shared: false, ty: AbstractHeapType::Extern } => {
-                WasmValue::RefNull(ValType::RefExtern)
+                WasmValue::RefExtern(ExternRef::null())
             }
             _ => bail!("unsupported arg type: refnull: {:?}", t),
         },
@@ -145,23 +146,18 @@ fn wastret2tinywasmvalue(ret: wast::WastRet) -> Result<tinywasm_types::WasmValue
         V128(i) => WasmValue::V128(wast_i128_to_i128(i)),
         RefNull(t) => match t {
             Some(wast::core::HeapType::Abstract { shared: false, ty: AbstractHeapType::Func }) => {
-                WasmValue::RefNull(ValType::RefFunc)
+                WasmValue::RefFunc(FuncRef::null())
             }
             Some(wast::core::HeapType::Abstract { shared: false, ty: AbstractHeapType::Extern }) => {
-                WasmValue::RefNull(ValType::RefExtern)
+                WasmValue::RefExtern(ExternRef::null())
             }
             _ => bail!("unsupported arg type: refnull: {:?}", t),
         },
-        RefExtern(v) => match v {
-            Some(v) => WasmValue::RefExtern(v),
-            None => WasmValue::RefNull(ValType::RefExtern),
-            _ => bail!("unsupported arg type: refextern: {:?}", v),
-        },
-        RefFunc(v) => match v {
-            Some(wast::token::Index::Num(n, _)) => WasmValue::RefFunc(n),
-            None => WasmValue::RefNull(ValType::RefFunc),
+        RefExtern(v) => WasmValue::RefExtern(ExternRef::new(v)),
+        RefFunc(v) => WasmValue::RefFunc(FuncRef::new(match v {
+            Some(wast::token::Index::Num(n, _)) => Some(n),
             _ => bail!("unsupported arg type: reffunc: {:?}", v),
-        },
+        })),
         a => bail!("unsupported arg type {:?}", a),
     })
 }

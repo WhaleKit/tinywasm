@@ -30,8 +30,8 @@ impl TableInstance {
         let val = self.get(addr)?.addr();
 
         Ok(match self.kind.element_type {
-            ValType::RefFunc => val.map_or(WasmValue::RefNull(ValType::RefFunc), WasmValue::RefFunc),
-            ValType::RefExtern => val.map_or(WasmValue::RefNull(ValType::RefExtern), WasmValue::RefExtern),
+            ValType::RefFunc => WasmValue::RefFunc(FuncRef::new(val)),
+            ValType::RefExtern => WasmValue::RefExtern(ExternRef::new(val)),
             _ => Err(Error::UnsupportedFeature("non-ref table".into()))?,
         })
     }
@@ -211,7 +211,7 @@ mod tests {
         }
 
         match table_instance.get_wasm_val(1) {
-            Ok(WasmValue::RefNull(ValType::RefFunc)) => {}
+            Ok(WasmValue::RefFunc(f)) if f.is_null() => {}
             _ => panic!("get_wasm_val failed to return the correct WasmValue"),
         }
 

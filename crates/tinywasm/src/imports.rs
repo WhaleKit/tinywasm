@@ -7,7 +7,7 @@ use core::fmt::Debug;
 
 use crate::coro::CoroState;
 use crate::func::{FromWasmValueTuple, IntoWasmValueTuple, ValTypesFromTuple};
-use crate::{coro, log, LinkingError, MemoryRef, MemoryRefMut, Result};
+use crate::{coro, log, LinkingError, MemoryRef, MemoryRefMut, PotentialCoroCallResult, Result};
 use tinywasm_types::*;
 
 /// The internal representation of a function
@@ -155,10 +155,28 @@ impl Extern {
         ty: &tinywasm_types::FuncType,
         func: impl Fn(FuncContext<'_>, &[WasmValue]) -> Result<Vec<WasmValue>> + 'static,
     ) -> Self {
-        let wrapper = move |c: FuncContext<'_>, v: &[WasmValue]| -> Result<InnerHostFunCallOutcome> {
-            Ok(InnerHostFunCallOutcome::Return(func(c, v)?))
+        let _ty = ty.clone();
+        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue]| 
+            -> Result<InnerHostFunCallOutcome> {
+            let _ty = _ty.clone();
+            let result = func(ctx, args)?;
+
+            if result.len() != _ty.results.len() {
+                return Err(crate::Error::InvalidHostFnReturn { expected: _ty.clone(), actual: result });
+            };
+
+            result.iter().zip(_ty.results.iter()).try_for_each(|(val, ty)| {
+                if val.val_type() != *ty {
+                    return Err(crate::Error::InvalidHostFnReturn { expected: _ty.clone(), actual: result.clone() });
+                }
+                Ok(())
+            })?;
+
+            Ok(PotentialCoroCallResult::Return(result))
         };
-        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(wrapper), ty: ty.clone() })))
+
+        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(inner_func), ty: ty.clone() })))
+
     }
 
     /// Create a new typed function import
