@@ -511,11 +511,13 @@ pub struct SuspendConditions {
 impl Debug for SuspendConditions {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let stop_cb_text = if self.suspend_cb.is_some() { "<present>" } else { "<not present>" };
-        f.debug_struct("SuspendConditions")
-            .field("stop_flag", &self.suspend_flag)
-            .field("timeout_instant", &self.timeout_instant)
-            .field("stop_cb", &stop_cb_text)
-            .finish()
+        let mut f = f.debug_struct("SuspendConditions");
+        f.field("stop_flag", &self.suspend_flag);
+        #[cfg(feature = "std")]
+        {
+            f.field("timeout_instant", &self.timeout_instant);
+        }
+        f.field("stop_cb", &stop_cb_text).finish()
     }
 }
 
