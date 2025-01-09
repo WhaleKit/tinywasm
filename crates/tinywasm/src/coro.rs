@@ -24,6 +24,8 @@ pub enum SuspendReason {
     /// async should_suspend flag was set
     /// host shouldn't provide resume argument when calling resume
     SuspendedFlag,
+
+    // possible others: delimited continuations proposal, debugger breakpoint, out of fuel
 }
 
 /// result of a function that might pause in the middle and yield
@@ -43,6 +45,7 @@ pub enum PotentialCoroCallResult<R, State>
 /// doesn't need to have state, since it's contained in self
 #[derive(Debug)]
 pub enum CoroStateResumeResult<R> {
+    /// CoroState has finished
     /// after this CoroState::resume can't be called again on that CoroState
     Return(R),
 

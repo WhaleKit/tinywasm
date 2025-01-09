@@ -96,7 +96,7 @@ pub use error::*;
 pub use func::{FuncHandle, FuncHandleTyped, SuspendFunc};
 pub use imports::*;
 pub use instance::ModuleInstance;
-pub use module::Module;
+pub use module::{IncompleteModule, Module};
 pub use reference::*;
 pub use store::*;
 
