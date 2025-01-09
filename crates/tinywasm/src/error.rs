@@ -30,7 +30,7 @@ pub enum Error {
         /// The actual value
         actual: Vec<tinywasm_types::WasmValue>,
     },
-    
+
     /// An invalid label type was encountered
     InvalidLabelType,
 

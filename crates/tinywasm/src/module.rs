@@ -1,4 +1,4 @@
-use crate::{CoroState, Imports, ModuleInstance, PotentialCoroCallResult, Result, Store, SuspendFunc};
+use crate::{CoroState, Imports, ModuleInstance, PotentialCoroCallResult, Result, Store, SuspendedFunc};
 use tinywasm_types::{ResumeArgument, TinyWasmModule};
 
 /// A WebAssembly Module
@@ -69,15 +69,12 @@ impl Module {
             Some(res) => res,
             None => return Ok(PotentialCoroCallResult::Return(instance)),
         };
-        match core_res {
-            crate::PotentialCoroCallResult::Return(_) => return Ok(PotentialCoroCallResult::Return(instance)),
+        Ok(match core_res {
+            crate::PotentialCoroCallResult::Return(_) => PotentialCoroCallResult::Return(instance),
             crate::PotentialCoroCallResult::Suspended(suspend_reason, state) => {
-                return Ok(PotentialCoroCallResult::Suspended(
-                    suspend_reason,
-                    IncompleteModule(Some(HitTheFloor(instance, state))),
-                ))
+                PotentialCoroCallResult::Suspended(suspend_reason, IncompleteModule(Some(HitTheFloor(instance, state))))
             }
-        }
+        })
     }
 }
 
@@ -86,9 +83,9 @@ impl Module {
 pub struct IncompleteModule(Option<HitTheFloor>);
 
 #[derive(Debug)]
-struct HitTheFloor(ModuleInstance, SuspendFunc);
+struct HitTheFloor(ModuleInstance, SuspendedFunc);
 
-impl<'a> CoroState<ModuleInstance, &'a mut Store> for IncompleteModule {
+impl CoroState<ModuleInstance, &mut Store> for IncompleteModule {
     fn resume(&mut self, ctx: &mut Store, arg: ResumeArgument) -> Result<crate::CoroStateResumeResult<ModuleInstance>> {
         let mut body: HitTheFloor = match self.0.take() {
             Some(body) => body,

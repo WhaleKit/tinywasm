@@ -70,7 +70,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
     #[inline(always)]
     pub(crate) fn resume(&mut self, res_arg: ResumeArgument) -> Result<ExecOutcome> {
         if let Some(coro_state) = self.suspended_host_coro.as_mut() {
-            let ctx = FuncContext { store: &mut self.store, module_addr: self.module.id() };
+            let ctx = FuncContext { store: self.store, module_addr: self.module.id() };
             let host_res = coro_state.coro_state.resume(ctx, res_arg)?;
             let res = match host_res {
                 CoroStateResumeResult::Return(res) => res,
@@ -120,7 +120,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         }
 
         if let Some(mut cb) = self.store.suspend_cond.suspend_cb.take() {
-            let should_suspend = matches!(cb(&self.store), ControlFlow::Break(()));
+            let should_suspend = matches!(cb(self.store), ControlFlow::Break(()));
             self.store.suspend_cond.suspend_cb = Some(cb); // put it back
             if should_suspend {
                 return ReasonToBreak::Suspended(SuspendReason::SuspendedCallback).into();
@@ -416,20 +416,19 @@ impl<'store, 'stack> Executor<'store, 'stack> {
     }
     fn exec_call_host(&mut self, host_func: Rc<HostFunction>, func_ref: u32) -> ControlFlow<ReasonToBreak> {
         let params = self.stack.values.pop_params(&host_func.ty.params);
-        let res =
-            host_func.call(FuncContext { store: self.store, module_addr: self.module.id() }, &params).to_cf()?;
+        let res = host_func.call(FuncContext { store: self.store, module_addr: self.module.id() }, &params).to_cf()?;
         match res {
             PotentialCoroCallResult::Return(res) => {
                 self.stack.values.extend_from_wasmvalues(&res);
                 self.cf.incr_instr_ptr();
                 self.check_should_suspend()?; // who knows how long we've spent in host function
-                return ControlFlow::Continue(());
+                ControlFlow::Continue(())
             }
             PotentialCoroCallResult::Suspended(suspend_reason, state) => {
                 self.suspended_host_coro =
                     Some(SuspendedHostCoroState { coro_state: state, coro_orig_function: func_ref });
                 self.cf.incr_instr_ptr();
-                return ReasonToBreak::Suspended(suspend_reason).into();
+                ReasonToBreak::Suspended(suspend_reason).into()
             }
         }
     }
@@ -527,10 +526,10 @@ impl<'store, 'stack> Executor<'store, 'stack> {
         if block_ty.is_none() {
             return self.exec_return();
         }
-        
+
         self.cf.incr_instr_ptr();
 
-        if matches!(block_ty, Some(BlockType::Loop)){
+        if matches!(block_ty, Some(BlockType::Loop)) {
             self.check_should_suspend()?;
         }
         ControlFlow::Continue(())
@@ -581,7 +580,7 @@ impl<'store, 'stack> Executor<'store, 'stack> {
 
         self.cf.incr_instr_ptr();
 
-        if matches!(block_ty, Some(BlockType::Loop)){
+        if matches!(block_ty, Some(BlockType::Loop)) {
             self.check_should_suspend()?;
         }
         ControlFlow::Continue(())

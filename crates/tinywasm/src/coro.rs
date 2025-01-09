@@ -4,6 +4,11 @@ use crate::Result;
 // use alloc::boxed::Box;
 pub(crate) use tinywasm_types::{ResumeArgument, YieldedValue};
 
+///"coroutine statse", "coroutine instance", "resumable". Stores info to continue a function that was paused
+pub trait CoroState<Ret, ResumeContext>: Debug {
+    /// resumes the execution of the coroutine
+    fn resume(&mut self, ctx: ResumeContext, arg: ResumeArgument) -> Result<CoroStateResumeResult<Ret>>;
+}
 
 /// explains why did execution suspend, and carries payload if needed
 #[derive(Debug)]
@@ -24,7 +29,6 @@ pub enum SuspendReason {
     /// async should_suspend flag was set
     /// host shouldn't provide resume argument when calling resume
     SuspendedFlag,
-
     // possible others: delimited continuations proposal, debugger breakpoint, out of fuel
 }
 
@@ -55,13 +59,19 @@ pub enum CoroStateResumeResult<R> {
 }
 
 impl<R, State> PotentialCoroCallResult<R, State> {
+
+    /// in case you expect function only to return
+    /// you can make Suspend into [crate::Error::UnexpectedSuspend] error
+    pub fn suspend_to_err(self) -> Result<R> {
+        match self {
+            PotentialCoroCallResult::Return(r) => Ok(r),
+            PotentialCoroCallResult::Suspended(r, _) => Err(crate::Error::UnexpectedSuspend(r)),
+        }
+    }
+
     /// true if coro is finished
     pub fn finished(&self) -> bool {
-        if let Self::Return(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Return(_))
     }
     /// separates state from PotentialCoroCallResult, leaving CoroStateResumeResult (one without state)
     pub fn split_state(self) -> (CoroStateResumeResult<R>, Option<State>) {
@@ -90,7 +100,7 @@ impl<R, State> PotentialCoroCallResult<R, State> {
         self,
         user_val: Usr,
         mapper: impl FnOnce(R, Usr) -> OutR,
-        otherwise: impl FnOnce(Usr) -> (),
+        otherwise: impl FnOnce(Usr),
     ) -> PotentialCoroCallResult<OutR, State> {
         match self {
             Self::Return(res) => PotentialCoroCallResult::Return(mapper(res, user_val)),
@@ -109,11 +119,7 @@ impl<R, State> PotentialCoroCallResult<R, State> {
 impl<R> CoroStateResumeResult<R> {
     /// true if coro is finished
     pub fn finished(&self) -> bool {
-        if let Self::Return(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Return(_))
     }
     /// separates result from CoroStateResumeResult, leaving unit type in it's place
     pub fn split_result(self) -> (CoroStateResumeResult<()>, Option<R>) {
@@ -129,7 +135,7 @@ impl<R> CoroStateResumeResult<R> {
         self,
         user_val: Usr,
         mapper: impl FnOnce(R, Usr) -> OutR,
-        otherwise: impl FnOnce(Usr) -> (),
+        otherwise: impl FnOnce(Usr),
     ) -> CoroStateResumeResult<OutR> {
         PotentialCoroCallResult::<R, ()>::from(self).map_result_or_else(user_val, mapper, otherwise).into()
     }
@@ -153,10 +159,4 @@ impl<SrcR> From<CoroStateResumeResult<SrcR>> for PotentialCoroCallResult<SrcR, (
             CoroStateResumeResult::Suspended(suspend) => PotentialCoroCallResult::Suspended(suspend, ()),
         }
     }
-}
-
-///"coroutine statse", "coroutine instance", "resumable". Stores info to continue a function that was paused
-pub trait CoroState<Ret, ResumeContext>: Debug {
-    /// resumes the execution of the coroutine
-    fn resume(&mut self, ctx: ResumeContext, arg: ResumeArgument) -> Result<CoroStateResumeResult<Ret>>;
 }

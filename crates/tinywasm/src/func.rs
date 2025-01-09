@@ -32,20 +32,21 @@ impl SuspendedWasmFunc {
 }
 
 #[derive(Debug)]
-pub(self) enum SuspendFuncInner {
+#[allow(clippy::large_enum_variant)] // Wasm is bigger, but also much more common variant
+enum SuspendedFuncInner {
     Wasm(SuspendedWasmFunc),
     Host(SuspendedHostCoroState),
 }
 
 /// handle to function that was suspended and can be resumed
 #[derive(Debug)]
-pub struct SuspendFunc {
-    func: SuspendFuncInner,
+pub struct SuspendedFunc {
+    func: SuspendedFuncInner,
     module_addr: ModuleInstanceAddr,
     store_id: usize,
 }
 
-impl<'a> crate::coro::CoroState<Vec<WasmValue>, &mut Store> for SuspendFunc {
+impl crate::coro::CoroState<Vec<WasmValue>, &mut Store> for SuspendedFunc {
     fn resume(&mut self, store: &mut Store, arg: ResumeArgument) -> Result<FuncHandleResumeOutcome> {
         if store.id() != self.store_id {
             return Err(Error::InvalidStore);
@@ -53,26 +54,22 @@ impl<'a> crate::coro::CoroState<Vec<WasmValue>, &mut Store> for SuspendFunc {
 
         let ctx = FuncContext { store, module_addr: self.module_addr };
         match &mut self.func {
-            SuspendFuncInner::Wasm(wasm) => wasm.resume(ctx, arg),
-            SuspendFuncInner::Host(host) => Ok(host.coro_state.resume(ctx, arg)?),
+            SuspendedFuncInner::Wasm(wasm) => wasm.resume(ctx, arg),
+            SuspendedFuncInner::Host(host) => Ok(host.coro_state.resume(ctx, arg)?),
         }
     }
 }
 
-type FuncHandleCallOutcome = crate::coro::PotentialCoroCallResult<Vec<WasmValue>, SuspendFunc>;
+type FuncHandleCallOutcome = crate::coro::PotentialCoroCallResult<Vec<WasmValue>, SuspendedFunc>;
 
 impl FuncHandle {
     /// Call a function (Invocation)
     ///
     /// See <https://webassembly.github.io/spec/core/exec/modules.html#invocation>
     ///
-
     #[inline]
     pub fn call(&self, store: &mut Store, params: &[WasmValue]) -> Result<Vec<WasmValue>> {
-        match self.call_coro(store, params)? {
-            crate::coro::PotentialCoroCallResult::Return(res) => Ok(res),
-            crate::coro::PotentialCoroCallResult::Suspended(suspend, _state) => Err(Error::UnexpectedSuspend(suspend)),
-        }
+        self.call_coro(store, params)?.suspend_to_err()
     }
 
     /// Call a function (Invocation) and anticipate possible yield instead as well as return
@@ -110,8 +107,8 @@ impl FuncHandle {
             Function::Host(host_func) => {
                 let host_func = host_func.clone();
                 let ctx = FuncContext { store, module_addr: self.module_addr };
-                return Ok(host_func.call(ctx, params)?.map_state(|state| SuspendFunc {
-                    func: SuspendFuncInner::Host(SuspendedHostCoroState {
+                return Ok(host_func.call(ctx, params)?.map_state(|state| SuspendedFunc {
+                    func: SuspendedFuncInner::Host(SuspendedHostCoroState {
                         coro_state: state,
                         coro_orig_function: self.addr,
                     }),
@@ -133,7 +130,7 @@ impl FuncHandle {
         let runtime = store.runtime();
         let exec_outcome = runtime.exec(store, stack)?;
         Ok(exec_outcome
-            .map_result(|mut stack| {
+            .map_result(|mut stack|->Vec<WasmValue> {
                 // Once the function returns:
                 // let result_m = func_ty.results.len();
 
@@ -141,13 +138,12 @@ impl FuncHandle {
                 // assert!(stack.values.len() >= result_m);
 
                 // 2. Pop m values from the stack
-                let res = stack.values.pop_results(&func_ty.results);
+                stack.values.pop_results(&func_ty.results)
                 // The values are returned as the results of the invocation.
-                return res;
             })
-            .map_state(|coro_state| -> SuspendFunc {
-                SuspendFunc {
-                    func: SuspendFuncInner::Wasm(SuspendedWasmFunc {
+            .map_state(|coro_state| -> SuspendedFunc {
+                SuspendedFunc {
+                    func: SuspendedFuncInner::Wasm(SuspendedWasmFunc {
                         runtime: coro_state,
                         result_types: func_ty.results.clone(),
                     }),

@@ -486,10 +486,13 @@ fn get_pair_mut<T>(slice: &mut [T], i: usize, j: usize) -> Option<(&mut T, &mut 
     Some(pair)
 }
 
+/// user callback for use in [SuspendConditions::suspend_cb]
+pub type ShouldSuspendCb = Box<dyn FnMut(&Store) -> ControlFlow<(), ()>>;
+
 // idk where really to put it, but it should be accessible to host environment (obviously)
-// and, less obviously, to host functions called from it, for calling wasm callbacks and propagating this config to them
-// or just complying with suspend conditions
-/// used to limit when how much cpu time wasm code should take
+// and (less obviously) to host functions called from it - for calling wasm callbacks and propagating this config to them
+// (or just complying with suspend conditions themselves)
+/// used to limit execution time wasm code takes
 #[derive(Default)]
 pub struct SuspendConditions {
     /// atomic flag. when set to true it means execution should suspend
@@ -499,13 +502,14 @@ pub struct SuspendConditions {
     /// instant at which execution should suspend
     /// can be used to control how much time will be spent in wasm without requiring other threads
     /// such as for time-slice multitasking
+    /// uses rust standard library for checking time - so not available in no-std
     #[cfg(feature = "std")]
     pub timeout_instant: Option<crate::std::time::Instant>,
 
     /// callback that returns [`ControlFlow::Break`]` when execution should suspend
     /// can be used when above methods are insufficient or
-    /// instead of [`timeout_instant`] in no-std builds if you have a clock function
-    pub suspend_cb: Option<Box<dyn FnMut(&Store) -> ControlFlow<(), ()>>>,
+    /// instead of [`timeout_instant`] in no-std builds, if you have your own clock function
+    pub suspend_cb: Option<ShouldSuspendCb>,
 }
 
 impl Debug for SuspendConditions {
@@ -521,6 +525,14 @@ impl Debug for SuspendConditions {
     }
 }
 
+impl SuspendConditions {
+    /// sets timeout_instant to `how_long` from now
+    #[cfg(feature = "std")]
+    pub fn set_timeout_in(&mut self, how_long: crate::std::time::Duration) {
+        self.timeout_instant = Some(crate::std::time::Instant::now() + how_long);
+    }
+}
+
 impl Store {
     /// sets suspend conditions for store
     pub fn set_suspend_conditions(&mut self, val: SuspendConditions) {
@@ -532,7 +544,7 @@ impl Store {
     }
     /// transforms suspend conditions for store using user-provided function
     pub fn update_suspend_conditions(&mut self, replacer: impl FnOnce(SuspendConditions) -> SuspendConditions) {
-        let temp = core::mem::replace(&mut self.suspend_cond, SuspendConditions::default());
+        let temp = core::mem::take(&mut self.suspend_cond);
         self.suspend_cond = replacer(temp);
     }
 }

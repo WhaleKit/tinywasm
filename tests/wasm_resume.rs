@@ -330,7 +330,7 @@ fn overflow_detect_snippet(var: &str) -> String {
 struct TestedModule {
     store: Store,
     instance: ModuleInstance,
-    resumable: Option<tinywasm::SuspendFunc>,
+    resumable: Option<tinywasm::SuspendedFunc>,
 }
 
 impl TestedModule {
