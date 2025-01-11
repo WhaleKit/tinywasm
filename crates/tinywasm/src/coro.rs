@@ -12,6 +12,7 @@ pub trait CoroState<Ret, ResumeContext>: Debug {
 
 /// explains why did execution suspend, and carries payload if needed
 #[derive(Debug)]
+#[non_exhaustive] // some variants are feature-gated
 pub enum SuspendReason {
     /// host function yielded
     /// potentially some host functions might expect resume argument when calling resume
@@ -59,7 +60,6 @@ pub enum CoroStateResumeResult<R> {
 }
 
 impl<R, State> PotentialCoroCallResult<R, State> {
-
     /// in case you expect function only to return
     /// you can make Suspend into [crate::Error::UnexpectedSuspend] error
     pub fn suspend_to_err(self) -> Result<R> {
@@ -95,24 +95,24 @@ impl<R, State> PotentialCoroCallResult<R, State> {
             Self::Suspended(suspend, state) => PotentialCoroCallResult::Suspended(suspend, mapper(state)),
         }
     }
-    /// transform result with mapper if there is none - calls "otherwise" arg. user_val
-    pub fn map_result_or_else<OutR, Usr>(
+    /// transform result with mapper if there is none - calls "otherwise".
+    /// user_val passed to whichever is called and is guaranteed to be used
+    pub fn map<OutR, Usr, OutS>(
         self,
         user_val: Usr,
-        mapper: impl FnOnce(R, Usr) -> OutR,
-        otherwise: impl FnOnce(Usr),
-    ) -> PotentialCoroCallResult<OutR, State> {
+        res_mapper: impl FnOnce(R, Usr) -> OutR,
+        state_mapper: impl FnOnce(State, Usr) -> OutS,
+    ) -> PotentialCoroCallResult<OutR, OutS> {
         match self {
-            Self::Return(res) => PotentialCoroCallResult::Return(mapper(res, user_val)),
+            Self::Return(res) => PotentialCoroCallResult::Return(res_mapper(res, user_val)),
             Self::Suspended(suspend, state) => {
-                otherwise(user_val);
-                PotentialCoroCallResult::Suspended(suspend, state)
+                PotentialCoroCallResult::Suspended(suspend, state_mapper(state, user_val))
             }
         }
     }
     /// transforms result
     pub fn map_result<OutR>(self, mapper: impl FnOnce(R) -> OutR) -> PotentialCoroCallResult<OutR, State> {
-        self.map_result_or_else((), |val, _| mapper(val), |_| {})
+        self.map((), |val, _| mapper(val), |s,_| {s})
     }
 }
 
@@ -130,14 +130,15 @@ impl<R> CoroStateResumeResult<R> {
     pub fn map_result<OutR>(self, mapper: impl FnOnce(R) -> OutR) -> CoroStateResumeResult<OutR> {
         PotentialCoroCallResult::<R, ()>::from(self).map_result(mapper).into()
     }
-    /// transform result with mapper if there is none - calls "otherwise" arg. user_val called
-    pub fn map_result_or_else<OutR, Usr>(
+    /// transform result with mapper. If there is none - calls "otherwise"
+    /// user_val passed to whichever is called and is guaranteed to be used
+    pub fn map<OutR, Usr>(
         self,
         user_val: Usr,
         mapper: impl FnOnce(R, Usr) -> OutR,
         otherwise: impl FnOnce(Usr),
     ) -> CoroStateResumeResult<OutR> {
-        PotentialCoroCallResult::<R, ()>::from(self).map_result_or_else(user_val, mapper, otherwise).into()
+        PotentialCoroCallResult::<R, ()>::from(self).map(user_val, mapper, |(), usr|{otherwise(usr)}).into()
     }
 }
 

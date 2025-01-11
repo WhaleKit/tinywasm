@@ -1,6 +1,5 @@
 use alloc::{boxed::Box, format, string::ToString, vec::Vec};
 use core::fmt::Debug;
-use core::ops::ControlFlow;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use tinywasm_types::*;
 
@@ -12,8 +11,10 @@ mod element;
 mod function;
 mod global;
 mod memory;
+mod suspend_conditions;
 mod table;
 
+pub use suspend_conditions::*;
 pub(crate) use {data::*, element::*, function::*, global::*, memory::*, table::*};
 
 // global store id counter
@@ -34,7 +35,11 @@ pub struct Store {
 
     pub(crate) data: StoreData,
     pub(crate) runtime: Runtime,
-    // idk where to put it, but here it's accessible to host functions without modifying their signature
+
+    // idk where really to put it, but it should be accessible to host environment (obviously)
+    // and (less obviously) to host functions called from store - for calling wasm callbacks and propagating this config to them
+    // (or just complying with suspend conditions themselves)
+    // alternatively it could be passed to function handles and passend into function context
     pub(crate) suspend_cond: SuspendConditions,
 }
 
@@ -486,53 +491,7 @@ fn get_pair_mut<T>(slice: &mut [T], i: usize, j: usize) -> Option<(&mut T, &mut 
     Some(pair)
 }
 
-/// user callback for use in [SuspendConditions::suspend_cb]
-pub type ShouldSuspendCb = Box<dyn FnMut(&Store) -> ControlFlow<(), ()>>;
-
-// idk where really to put it, but it should be accessible to host environment (obviously)
-// and (less obviously) to host functions called from it - for calling wasm callbacks and propagating this config to them
-// (or just complying with suspend conditions themselves)
-/// used to limit execution time wasm code takes
-#[derive(Default)]
-pub struct SuspendConditions {
-    /// atomic flag. when set to true it means execution should suspend
-    /// can be used to tell executor to stop from another thread
-    pub suspend_flag: Option<alloc::sync::Arc<core::sync::atomic::AtomicBool>>,
-
-    /// instant at which execution should suspend
-    /// can be used to control how much time will be spent in wasm without requiring other threads
-    /// such as for time-slice multitasking
-    /// uses rust standard library for checking time - so not available in no-std
-    #[cfg(feature = "std")]
-    pub timeout_instant: Option<crate::std::time::Instant>,
-
-    /// callback that returns [`ControlFlow::Break`]` when execution should suspend
-    /// can be used when above methods are insufficient or
-    /// instead of [`timeout_instant`] in no-std builds, if you have your own clock function
-    pub suspend_cb: Option<ShouldSuspendCb>,
-}
-
-impl Debug for SuspendConditions {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let stop_cb_text = if self.suspend_cb.is_some() { "<present>" } else { "<not present>" };
-        let mut f = f.debug_struct("SuspendConditions");
-        f.field("stop_flag", &self.suspend_flag);
-        #[cfg(feature = "std")]
-        {
-            f.field("timeout_instant", &self.timeout_instant);
-        }
-        f.field("stop_cb", &stop_cb_text).finish()
-    }
-}
-
-impl SuspendConditions {
-    /// sets timeout_instant to `how_long` from now
-    #[cfg(feature = "std")]
-    pub fn set_timeout_in(&mut self, how_long: crate::std::time::Duration) {
-        self.timeout_instant = Some(crate::std::time::Instant::now() + how_long);
-    }
-}
-
+// suspend_conditions-related functions
 impl Store {
     /// sets suspend conditions for store
     pub fn set_suspend_conditions(&mut self, val: SuspendConditions) {
@@ -543,8 +502,8 @@ impl Store {
         &self.suspend_cond
     }
     /// transforms suspend conditions for store using user-provided function
-    pub fn update_suspend_conditions(&mut self, replacer: impl FnOnce(SuspendConditions) -> SuspendConditions) {
+    pub fn update_suspend_conditions(&mut self, mapper: impl FnOnce(SuspendConditions) -> SuspendConditions) {
         let temp = core::mem::take(&mut self.suspend_cond);
-        self.suspend_cond = replacer(temp);
+        self.suspend_cond = mapper(temp);
     }
 }

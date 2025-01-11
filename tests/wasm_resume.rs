@@ -1,10 +1,7 @@
 use core::panic;
 use eyre;
 use std::sync;
-use std::{
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::{ops::ControlFlow, time::Duration};
 use tinywasm::{
     CoroState, CoroStateResumeResult, Module, ModuleInstance, PotentialCoroCallResult, Store, SuspendConditions,
     SuspendReason,
@@ -17,7 +14,7 @@ fn main() -> std::result::Result<(), eyre::Report> {
     println!("\n# testing with callback");
     let mut cb_cond = |store: &mut Store| {
         let callback = make_suspend_in_time_cb(30);
-        store.set_suspend_conditions(SuspendConditions { suspend_cb: Some(Box::new(callback)), ..Default::default() });
+        store.set_suspend_conditions(SuspendConditions::new().with_suspend_callback(Box::new(callback)));
     };
     suspend_with_pure_loop(&mut cb_cond, SuspendReason::SuspendedCallback)?;
     suspend_with_wasm_fn(&mut cb_cond, SuspendReason::SuspendedCallback)?;
@@ -25,10 +22,7 @@ fn main() -> std::result::Result<(), eyre::Report> {
 
     println!("\n# testing with epoch");
     let mut time_cond = |store: &mut Store| {
-        store.set_suspend_conditions(SuspendConditions {
-            timeout_instant: Some(Instant::now() + Duration::from_millis(10)),
-            ..Default::default()
-        })
+        store.set_suspend_conditions(SuspendConditions::new().with_timeout_in(Duration::from_millis(10)))
     };
     suspend_with_pure_loop(&mut time_cond, SuspendReason::SuspendedEpoch)?;
     suspend_with_wasm_fn(&mut time_cond, SuspendReason::SuspendedEpoch)?;
@@ -37,7 +31,7 @@ fn main() -> std::result::Result<(), eyre::Report> {
     println!("\n# testing atomic bool");
     let mut cb_thead = |store: &mut Store| {
         let arc = sync::Arc::<sync::atomic::AtomicBool>::new(sync::atomic::AtomicBool::new(false));
-        store.set_suspend_conditions(SuspendConditions { suspend_flag: Some(arc.clone()), ..Default::default() });
+        store.set_suspend_conditions(SuspendConditions::new().with_suspend_flag(arc.clone()));
         let handle = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(10));
             arc.store(true, sync::atomic::Ordering::Release);
@@ -70,6 +64,7 @@ fn try_compare(lhs: &SuspendReason, rhs: &SuspendReason) -> eyre::Result<bool> {
         SuspendReason::SuspendedEpoch => matches!(rhs, SuspendReason::SuspendedEpoch),
         SuspendReason::SuspendedCallback => matches!(rhs, SuspendReason::SuspendedCallback),
         SuspendReason::SuspendedFlag => matches!(rhs, SuspendReason::SuspendedFlag),
+        _ =>eyre::bail!("unimplemented new variant"),
     })
 }
 
