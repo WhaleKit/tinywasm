@@ -231,6 +231,7 @@ impl From<SuspendReason> for UnexpectedSuspendError {
     fn from(value: SuspendReason) -> Self {
         match value {
             SuspendReason::Yield(_) => Self::Yield,
+            #[cfg(feature = "std")]
             SuspendReason::SuspendedEpoch => Self::SuspendedEpoch,
             SuspendReason::SuspendedCallback => Self::SuspendedCallback,
             SuspendReason::SuspendedFlag => Self::SuspendedFlag,
