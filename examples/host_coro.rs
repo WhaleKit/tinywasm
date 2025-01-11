@@ -56,9 +56,11 @@ fn main() -> eyre::Result<()> {
                            vals: &[WasmValue]|
      -> tinywasm::Result<PotentialCoroCallResult<Vec<WasmValue>, Box<dyn HostCoroState>>> {
         let base = if let WasmValue::I32(v) = vals.first().expect("wrong args") { v } else { panic!("wrong arg") };
-        let val_to_yield = Box::new(MyUserData { magic: 42 });
         let coro = Box::new(MySuspendedState { base: *base });
-        return Ok(PotentialCoroCallResult::Suspended(SuspendReason::Yield(Some(val_to_yield)), coro));
+        return Ok(PotentialCoroCallResult::Suspended(
+            SuspendReason::make_yield::<MyUserData>(MyUserData { magic: 42 }),
+            coro,
+        ));
     };
     imports.define(
         "host",

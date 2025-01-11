@@ -6,7 +6,7 @@ use tinywasm_types::FuncType;
 #[cfg(feature = "parser")]
 pub use tinywasm_parser::ParseError;
 
-use crate::{coro::SuspendReason, interpreter};
+use crate::{coro::UnexpectedSuspendError, interpreter};
 
 /// Errors that can occur for `TinyWasm` operations
 #[derive(Debug)]
@@ -45,7 +45,7 @@ pub enum Error {
 
     /// Function unexpectedly yielded instead of returning
     /// (for backwards compatibility with old api)
-    UnexpectedSuspend(SuspendReason),
+    UnexpectedSuspend(UnexpectedSuspendError),
 
     #[cfg(feature = "std")]
     /// An I/O error occurred

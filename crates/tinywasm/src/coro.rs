@@ -15,7 +15,7 @@ pub trait CoroState<Ret, ResumeContext>: Debug {
 #[non_exhaustive] // some variants are feature-gated
 pub enum SuspendReason {
     /// host function yielded
-    /// potentially some host functions might expect resume argument when calling resume
+    /// some host functions might expect resume argument when calling resume
     Yield(YieldedValue),
 
     /// time to suspend has come,
@@ -23,7 +23,7 @@ pub enum SuspendReason {
     #[cfg(feature = "std")]
     SuspendedEpoch,
 
-    /// user's should-suspend-callback,
+    /// user's should-suspend-callback returned Break,
     /// host shouldn't provide resume argument when calling resume
     SuspendedCallback,
 
@@ -65,7 +65,7 @@ impl<R, State> PotentialCoroCallResult<R, State> {
     pub fn suspend_to_err(self) -> Result<R> {
         match self {
             PotentialCoroCallResult::Return(r) => Ok(r),
-            PotentialCoroCallResult::Suspended(r, _) => Err(crate::Error::UnexpectedSuspend(r)),
+            PotentialCoroCallResult::Suspended(r, _) => Err(crate::Error::UnexpectedSuspend(r.into())),
         }
     }
 
@@ -112,7 +112,7 @@ impl<R, State> PotentialCoroCallResult<R, State> {
     }
     /// transforms result
     pub fn map_result<OutR>(self, mapper: impl FnOnce(R) -> OutR) -> PotentialCoroCallResult<OutR, State> {
-        self.map((), |val, _| mapper(val), |s,_| {s})
+        self.map((), |val, _| mapper(val), |s, _| s)
     }
 }
 
@@ -138,7 +138,7 @@ impl<R> CoroStateResumeResult<R> {
         mapper: impl FnOnce(R, Usr) -> OutR,
         otherwise: impl FnOnce(Usr),
     ) -> CoroStateResumeResult<OutR> {
-        PotentialCoroCallResult::<R, ()>::from(self).map(user_val, mapper, |(), usr|{otherwise(usr)}).into()
+        PotentialCoroCallResult::<R, ()>::from(self).map(user_val, mapper, |(), usr| otherwise(usr)).into()
     }
 }
 
@@ -158,6 +158,42 @@ impl<SrcR> From<CoroStateResumeResult<SrcR>> for PotentialCoroCallResult<SrcR, (
         match value {
             CoroStateResumeResult::Return(val) => PotentialCoroCallResult::Return(val),
             CoroStateResumeResult::Suspended(suspend) => PotentialCoroCallResult::Suspended(suspend, ()),
+        }
+    }
+}
+
+impl SuspendReason {
+    /// shotrhand to package val into a Box<any> in a [SuspendReason::Yield] variant
+    /// you'll need to specify type explicitly, because you'll need to use exact same type when downcasting
+    pub fn make_yield<T>(val: impl Into<T> + core::any::Any) -> Self {
+        Self::Yield(Some(alloc::boxed::Box::new(val) as alloc::boxed::Box<dyn core::any::Any>))
+    }
+}
+
+// same as SuspendReason, but without [tinywasm_types::YieldedValue]
+// it's opaque anyway, and error has Send and Sync which aren't typically needed for yielded value
+#[derive(Debug)]
+pub enum UnexpectedSuspendError {
+    /// host function yielded
+    Yield,
+
+    /// timeout,
+    #[cfg(feature = "std")]
+    SuspendedEpoch,
+
+    /// user's should-suspend-callback returned Break,
+    SuspendedCallback,
+
+    /// async should_suspend flag was set
+    SuspendedFlag,
+}
+impl From<SuspendReason> for UnexpectedSuspendError {
+    fn from(value: SuspendReason) -> Self {
+        match value {
+            SuspendReason::Yield(_) => Self::Yield,
+            SuspendReason::SuspendedEpoch => Self::SuspendedEpoch,
+            SuspendReason::SuspendedCallback => Self::SuspendedCallback,
+            SuspendReason::SuspendedFlag => Self::SuspendedFlag,
         }
     }
 }
