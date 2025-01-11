@@ -31,7 +31,6 @@ fn make_sometimes_breaking_cb(probability: f64) -> impl FnMut(&tinywasm::Store) 
     }
 }
 
-
 #[cfg(not(feature = "test_async"))]
 pub fn exec_fn_instance(
     instance: Option<&ModuleInstanceAddr>,
@@ -51,7 +50,6 @@ pub fn exec_fn_instance(
     func.call(store, args)
 }
 
-
 #[cfg(feature = "test_async")]
 pub fn exec_fn_instance(
     instance: Option<&ModuleInstanceAddr>,
@@ -66,7 +64,7 @@ pub fn exec_fn_instance(
     let mut prev_reason = None;
     store.update_suspend_conditions(|old_cond| {
         prev_reason = Some(old_cond);
-        SuspendConditions { suspend_cb: Some(Box::new(make_sometimes_breaking_cb(2.0 / 3.0))), ..Default::default() }
+        SuspendConditions::new().with_suspend_callback(Box::new(make_sometimes_breaking_cb(2.0 / 3.0)))
     });
     let res = || -> Result<Vec<tinywasm_types::WasmValue>, tinywasm::Error> {
         let Some(instance) = store.get_module_instance(*instance) else {
@@ -124,10 +122,9 @@ pub fn exec_fn(
 
     let mut store = tinywasm::Store::new();
 
-    store.set_suspend_conditions(SuspendConditions {
-        suspend_cb: Some(Box::new(make_sometimes_breaking_cb(2.0 / 3.0))),
-        ..Default::default()
-    });
+    store.set_suspend_conditions(
+        SuspendConditions::new().with_suspend_callback(Box::new(make_sometimes_breaking_cb(2.0 / 3.0))),
+    );
 
     let module = tinywasm::Module::from(module);
     let instance = match module.instantiate_coro(&mut store, imports)? {
@@ -159,7 +156,6 @@ pub fn exec_fn(
         }
     }
 }
-
 
 pub fn catch_unwind_silent<R>(f: impl FnOnce() -> R) -> std::thread::Result<R> {
     let prev_hook = panic::take_hook();

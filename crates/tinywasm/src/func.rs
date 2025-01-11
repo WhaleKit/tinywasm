@@ -18,50 +18,6 @@ pub struct FuncHandle {
     pub name: Option<String>,
 }
 
-pub(crate) type FuncHandleResumeOutcome = crate::coro::CoroStateResumeResult<Vec<WasmValue>>;
-
-#[derive(Debug)]
-struct SuspendedWasmFunc {
-    runtime: interpreter::SuspendedRuntime,
-    result_types: Box<[ValType]>,
-}
-impl SuspendedWasmFunc {
-    fn resume(&mut self, ctx: FuncContext<'_>, arg: ResumeArgument) -> Result<FuncHandleResumeOutcome> {
-        Ok(self.runtime.resume(ctx, arg)?.map_result(|mut stack| stack.values.pop_results(&self.result_types)))
-    }
-}
-
-#[derive(Debug)]
-#[allow(clippy::large_enum_variant)] // Wasm is bigger, but also much more common variant
-enum SuspendedFuncInner {
-    Wasm(SuspendedWasmFunc),
-    Host(SuspendedHostCoroState),
-}
-
-/// handle to function that was suspended and can be resumed
-#[derive(Debug)]
-pub struct SuspendedFunc {
-    func: SuspendedFuncInner,
-    module_addr: ModuleInstanceAddr,
-    store_id: usize,
-}
-
-impl crate::coro::CoroState<Vec<WasmValue>, &mut Store> for SuspendedFunc {
-    fn resume(&mut self, store: &mut Store, arg: ResumeArgument) -> Result<FuncHandleResumeOutcome> {
-        if store.id() != self.store_id {
-            return Err(Error::InvalidStore);
-        }
-
-        let ctx = FuncContext { store, module_addr: self.module_addr };
-        match &mut self.func {
-            SuspendedFuncInner::Wasm(wasm) => wasm.resume(ctx, arg),
-            SuspendedFuncInner::Host(host) => Ok(host.coro_state.resume(ctx, arg)?),
-        }
-    }
-}
-
-type FuncHandleCallOutcome = crate::coro::PotentialCoroCallResult<Vec<WasmValue>, SuspendedFunc>;
-
 impl FuncHandle {
     /// Call a function (Invocation)
     ///
@@ -130,7 +86,7 @@ impl FuncHandle {
         let runtime = store.runtime();
         let exec_outcome = runtime.exec(store, stack)?;
         Ok(exec_outcome
-            .map_result(|mut stack|->Vec<WasmValue> {
+            .map_result(|mut stack| -> Vec<WasmValue> {
                 // Once the function returns:
                 // let result_m = func_ty.results.len();
 
@@ -183,6 +139,92 @@ impl<P: IntoWasmValueTuple, R: FromWasmValueTuple> FuncHandleTyped<P, R> {
 
         // Convert the Vec<WasmValue> back to R
         R::from_wasm_value_tuple(&result)
+    }
+
+    /// call a typed function, anticipating possible suspension of execution
+    pub fn call_coro(&self, store: &mut Store, params: P) -> Result<TypedFuncHandleCallOutcome<R>> {
+        // Convert params into Vec<WasmValue>
+        let wasm_values = params.into_wasm_value_tuple();
+
+        // Call the underlying WASM function
+        let result = self.func.call_coro(store, &wasm_values)?;
+
+        // Convert the Vec<WasmValue> back to R
+        result
+            .map_result(|vals| R::from_wasm_value_tuple(&vals))
+            .map_state(|state| SuspendedFuncTyped::<R> { func: state, _marker: core::marker::PhantomData {} })
+            .propagate_err_result()
+    }
+}
+
+pub(crate) type FuncHandleCallOutcome = crate::coro::PotentialCoroCallResult<Vec<WasmValue>, SuspendedFunc>;
+pub(crate) type TypedFuncHandleCallOutcome<R> = crate::coro::PotentialCoroCallResult<R, SuspendedFuncTyped<R>>;
+
+#[derive(Debug)]
+struct SuspendedWasmFunc {
+    runtime: interpreter::SuspendedRuntime,
+    result_types: Box<[ValType]>,
+}
+impl SuspendedWasmFunc {
+    fn resume(
+        &mut self,
+        ctx: FuncContext<'_>,
+        arg: ResumeArgument,
+    ) -> Result<crate::CoroStateResumeResult<Vec<WasmValue>>> {
+        Ok(self.runtime.resume(ctx, arg)?.map_result(|mut stack| stack.values.pop_results(&self.result_types)))
+    }
+}
+
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)] // Wasm is bigger, but also much more common variant
+enum SuspendedFuncInner {
+    Wasm(SuspendedWasmFunc),
+    Host(SuspendedHostCoroState),
+}
+
+/// handle to function that was suspended and can be resumed
+#[derive(Debug)]
+pub struct SuspendedFunc {
+    func: SuspendedFuncInner,
+    module_addr: ModuleInstanceAddr,
+    store_id: usize,
+}
+
+impl crate::coro::CoroState<Vec<WasmValue>, &mut Store> for SuspendedFunc {
+    fn resume(
+        &mut self,
+        store: &mut Store,
+        arg: ResumeArgument,
+    ) -> Result<crate::CoroStateResumeResult<Vec<WasmValue>>> {
+        if store.id() != self.store_id {
+            return Err(Error::InvalidStore);
+        }
+
+        let ctx = FuncContext { store, module_addr: self.module_addr };
+        match &mut self.func {
+            SuspendedFuncInner::Wasm(wasm) => wasm.resume(ctx, arg),
+            SuspendedFuncInner::Host(host) => Ok(host.coro_state.resume(ctx, arg)?),
+        }
+    }
+}
+
+pub struct SuspendedFuncTyped<R> {
+    pub func: SuspendedFunc,
+    pub(crate) _marker: core::marker::PhantomData<R>,
+}
+
+impl<R> core::fmt::Debug for SuspendedFuncTyped<R> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SuspendedFuncTyped").field("func", &self.func).finish()
+    }
+}
+
+impl<R> crate::coro::CoroState<R, &mut Store> for SuspendedFuncTyped<R>
+where
+    R: FromWasmValueTuple,
+{
+    fn resume(&mut self, ctx: &mut Store, arg: ResumeArgument) -> Result<crate::CoroStateResumeResult<R>> {
+        self.func.resume(ctx, arg)?.map_result(|vals| R::from_wasm_value_tuple(&vals)).propagate_err()
     }
 }
 

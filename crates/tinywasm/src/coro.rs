@@ -116,7 +116,39 @@ impl<R, State> PotentialCoroCallResult<R, State> {
     }
 }
 
+impl<R, State, E> PotentialCoroCallResult<core::result::Result<R, E>, State> {
+    /// turns Self<Result<R>, S> into Resulf<Self<R>, S>
+    pub fn propagate_err_result(self) -> core::result::Result<PotentialCoroCallResult<R, State>, E> {
+        Ok(match self {
+            PotentialCoroCallResult::Return(res) => PotentialCoroCallResult::<R, State>::Return(res?),
+            PotentialCoroCallResult::Suspended(why, state) => {
+                PotentialCoroCallResult::<R, State>::Suspended(why, state)
+            }
+        })
+    }
+}
+impl<R, State, E> PotentialCoroCallResult<R, core::result::Result<State, E>> {
+    /// turns Self<R, Result<S>> into Resulf<R, Self<S>>
+    pub fn propagate_err_state(self) -> core::result::Result<PotentialCoroCallResult<R, State>, E> {
+        Ok(match self {
+            PotentialCoroCallResult::Return(res) => PotentialCoroCallResult::<R, State>::Return(res),
+            PotentialCoroCallResult::Suspended(why, state) => {
+                PotentialCoroCallResult::<R, State>::Suspended(why, state?)
+            }
+        })
+    }
+}
+
 impl<R> CoroStateResumeResult<R> {
+    /// in case you expect function only to return
+    /// you can make Suspend into [crate::Error::UnexpectedSuspend] error
+    pub fn suspend_to_err(self) -> Result<R> {
+        match self {
+            Self::Return(r) => Ok(r),
+            Self::Suspended(r) => Err(crate::Error::UnexpectedSuspend(r.into())),
+        }
+    }
+
     /// true if coro is finished
     pub fn finished(&self) -> bool {
         matches!(self, Self::Return(_))
@@ -142,6 +174,14 @@ impl<R> CoroStateResumeResult<R> {
     }
 }
 
+impl<R, E> CoroStateResumeResult<core::result::Result<R, E>> {
+    /// turns Self<Result<R>> into Resulf<Self<R>>
+    pub fn propagate_err(self) -> core::result::Result<CoroStateResumeResult<R>, E> {
+        Ok(PotentialCoroCallResult::<core::result::Result<R, E>, ()>::from(self).propagate_err_result()?.into())
+    }
+}
+
+// convert between PotentialCoroCallResult<SrcR, ()> and CoroStateResumeResult<SrcR>
 impl<DstR, SrcR> From<PotentialCoroCallResult<SrcR, ()>> for CoroStateResumeResult<DstR>
 where
     DstR: From<SrcR>,
