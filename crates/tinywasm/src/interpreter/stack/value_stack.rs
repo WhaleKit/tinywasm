@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use tinywasm_types::{ValType, ValueCounts, ValueCountsSmall, WasmValue};
+use tinywasm_types::{ExternRef, FuncRef, ValType, ValueCounts, ValueCountsSmall, WasmValue};
 
 use crate::{interpreter::*, Result};
 
@@ -173,14 +173,8 @@ impl ValueStack {
             ValType::V128 => WasmValue::V128(self.pop()),
             ValType::F32 => WasmValue::F32(self.pop()),
             ValType::F64 => WasmValue::F64(self.pop()),
-            ValType::RefExtern => match self.pop() {
-                Some(v) => WasmValue::RefExtern(v),
-                None => WasmValue::RefNull(ValType::RefExtern),
-            },
-            ValType::RefFunc => match self.pop() {
-                Some(v) => WasmValue::RefFunc(v),
-                None => WasmValue::RefNull(ValType::RefFunc),
-            },
+            ValType::RefExtern => WasmValue::RefExtern(ExternRef::new(self.pop())),
+            ValType::RefFunc => WasmValue::RefFunc(FuncRef::new(self.pop())),
         }
     }
 

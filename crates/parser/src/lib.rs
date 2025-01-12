@@ -65,6 +65,7 @@ impl Parser {
             memory64: true,
             custom_page_sizes: true,
 
+            extended_const: false,
             wide_arithmetic: false,
             gc_types: true,
             stack_switching: false,
@@ -73,7 +74,6 @@ impl Parser {
             component_model_values: false,
             component_model_more_flags: false,
             exceptions: false,
-            extended_const: false,
             gc: false,
             memory_control: false,
             relaxed_simd: false,
@@ -81,6 +81,7 @@ impl Parser {
             shared_everything_threads: false,
             component_model_multiple_returns: false,
             legacy_exceptions: false,
+            component_model_async: false,
         };
         Validator::new_with_features(features.into())
     }

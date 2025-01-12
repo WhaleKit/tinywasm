@@ -278,12 +278,13 @@ impl Store {
 
     fn elem_addr(&self, item: &ElementItem, globals: &[Addr], funcs: &[FuncAddr]) -> Result<Option<u32>> {
         let res = match item {
-            ElementItem::Func(addr) | ElementItem::Expr(ConstInstruction::RefFunc(addr)) => {
+            ElementItem::Func(addr) | ElementItem::Expr(ConstInstruction::RefFunc(Some(addr))) => {
                 Some(funcs.get(*addr as usize).copied().ok_or_else(|| {
                     Error::Other(format!("function {addr} not found. This should have been caught by the validator"))
                 })?)
             }
-            ElementItem::Expr(ConstInstruction::RefNull(_ty)) => None,
+            ElementItem::Expr(ConstInstruction::RefFunc(None)) => None,
+            ElementItem::Expr(ConstInstruction::RefExtern(None)) => None,
             ElementItem::Expr(ConstInstruction::GlobalGet(addr)) => {
                 let addr = globals.get(*addr as usize).copied().ok_or_else(|| {
                     Error::Other(format!("global {addr} not found. This should have been caught by the validator"))
@@ -450,10 +451,14 @@ impl Store {
                     self.data.globals.get(*addr as usize).expect("global not found. This should be unreachable");
                 global.value.get()
             }
-            RefNull(t) => t.default_value().into(),
-            RefFunc(idx) => TinyWasmValue::ValueRef(Some(*module_func_addrs.get(*idx as usize).ok_or_else(|| {
-                Error::Other(format!("function {idx} not found. This should have been caught by the validator"))
-            })?)),
+            RefFunc(None) => TinyWasmValue::ValueRef(None),
+            RefExtern(None) => TinyWasmValue::ValueRef(None),
+            RefFunc(Some(idx)) => {
+                TinyWasmValue::ValueRef(Some(*module_func_addrs.get(*idx as usize).ok_or_else(|| {
+                    Error::Other(format!("function {idx} not found. This should have been caught by the validator"))
+                })?))
+            }
+            _ => return Err(Error::Other("unsupported const instruction".to_string())),
         };
         Ok(val)
     }

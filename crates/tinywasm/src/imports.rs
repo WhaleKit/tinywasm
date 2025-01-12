@@ -139,7 +139,26 @@ impl Extern {
         ty: &tinywasm_types::FuncType,
         func: impl Fn(FuncContext<'_>, &[WasmValue]) -> Result<Vec<WasmValue>> + 'static,
     ) -> Self {
-        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(func), ty: ty.clone() })))
+        let _ty = ty.clone();
+        let inner_func = move |ctx: FuncContext<'_>, args: &[WasmValue]| -> Result<Vec<WasmValue>> {
+            let _ty = _ty.clone();
+            let result = func(ctx, args)?;
+
+            if result.len() != _ty.results.len() {
+                return Err(crate::Error::InvalidHostFnReturn { expected: _ty.clone(), actual: result });
+            };
+
+            result.iter().zip(_ty.results.iter()).try_for_each(|(val, ty)| {
+                if val.val_type() != *ty {
+                    return Err(crate::Error::InvalidHostFnReturn { expected: _ty.clone(), actual: result.clone() });
+                }
+                Ok(())
+            })?;
+
+            Ok(result)
+        };
+
+        Self::Function(Function::Host(Rc::new(HostFunction { func: Box::new(inner_func), ty: ty.clone() })))
     }
 
     /// Create a new typed function import

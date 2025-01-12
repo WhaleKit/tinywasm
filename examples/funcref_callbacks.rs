@@ -1,5 +1,5 @@
 use eyre::Result;
-use tinywasm::{types::WasmFuncRef, Extern, FuncContext, Imports, Module, Store};
+use tinywasm::{types::FuncRef, Extern, FuncContext, Imports, Module, Store};
 use wat;
 
 fn main() -> Result<()> {
@@ -59,9 +59,9 @@ fn by_func_ref_passed() -> Result<()> {
     imports.define(
         "host",
         "call_this",
-        Extern::typed_func(|mut ctx: FuncContext<'_>, fn_ref: WasmFuncRef| -> tinywasm::Result<()> {
+        Extern::typed_func(|mut ctx: FuncContext<'_>, fn_ref: FuncRef| -> tinywasm::Result<()> {
             let proxy_caller =
-                ctx.module().exported_func::<(WasmFuncRef, i32, i32), i32>(ctx.store(), "call_binop_by_ref")?;
+                ctx.module().exported_func::<(FuncRef, i32, i32), i32>(ctx.store(), "call_binop_by_ref")?;
             // call callback we got as argument using call_binop_by_ref
             let res = proxy_caller.call(ctx.store_mut(), (fn_ref, 5, 3))?;
             println!("(funcref {fn_ref:?})(5,3) results in {res}");
@@ -137,15 +137,15 @@ fn by_func_ref_returned() -> Result<()> {
     {
         // ask module what should we call
         let funcrefs = {
-            let address_getter = instance
-                .exported_func::<(), (WasmFuncRef, WasmFuncRef, WasmFuncRef)>(&mut store, "what_should_host_call")?;
+            let address_getter =
+                instance.exported_func::<(), (FuncRef, FuncRef, FuncRef)>(&mut store, "what_should_host_call")?;
             address_getter.call(&mut store, ())?
         };
-        let proxy_caller = instance.exported_func::<(WasmFuncRef, i32, i32), i32>(&mut store, "call_binop_by_ref")?;
+        let proxy_caller = instance.exported_func::<(FuncRef, i32, i32), i32>(&mut store, "call_binop_by_ref")?;
         for (idx, func_ref) in [funcrefs.0, funcrefs.1, funcrefs.2].iter().enumerate() {
             // call those funcrefs via "call_binop_by_ref"
             let res = proxy_caller.call(&mut store, (*func_ref, 5, 3))?;
-            println!("at idx: {idx} funcref {func_ref:?} results in {res}");
+            println!("at idx: {idx} funcref {func_ref:?}(5,3) results in {res}");
         }
     }
     Ok(())
