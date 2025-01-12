@@ -3,10 +3,9 @@ use eyre;
 use std::sync;
 use std::{ops::ControlFlow, time::Duration};
 use tinywasm::{
-    CoroState, CoroStateResumeResult, Module, ModuleInstance, PotentialCoroCallResult, Store, SuspendConditions,
-    SuspendReason,
+    CoroState, CoroStateResumeResult, Extern, Imports, Module, ModuleInstance, PotentialCoroCallResult, Store,
+    SuspendConditions, SuspendReason,
 };
-use tinywasm::{Extern, Imports};
 use wat;
 
 #[test]
@@ -64,7 +63,7 @@ fn try_compare(lhs: &SuspendReason, rhs: &SuspendReason) -> eyre::Result<bool> {
         SuspendReason::SuspendedEpoch => matches!(rhs, SuspendReason::SuspendedEpoch),
         SuspendReason::SuspendedCallback => matches!(rhs, SuspendReason::SuspendedCallback),
         SuspendReason::SuspendedFlag => matches!(rhs, SuspendReason::SuspendedFlag),
-        _ =>eyre::bail!("unimplemented new variant"),
+        _ => eyre::bail!("unimplemented new variant"),
     })
 }
 
