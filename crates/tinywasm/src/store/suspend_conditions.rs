@@ -1,3 +1,5 @@
+#![cfg(feature = "async")]
+
 use crate::store::Store;
 use alloc::boxed::Box;
 use core::fmt::Debug;
