@@ -1,5 +1,10 @@
-use crate::{CoroState, Imports, ModuleInstance, PotentialCoroCallResult, Result, Store, SuspendedFunc};
-use tinywasm_types::{ResumeArgument, TinyWasmModule};
+#[cfg(feature = "async")]
+use crate::{CoroState, PotentialCoroCallResult, SuspendedFunc};
+#[cfg(feature = "async")]
+use tinywasm_types::ResumeArgument;
+
+use crate::{Imports, ModuleInstance, Result, Store};
+use tinywasm_types::TinyWasmModule;
 
 /// A WebAssembly Module
 ///
@@ -59,6 +64,7 @@ impl Module {
 
     /// same as [Self::instantiate] but accounts for possibility of start function suspending, in which case it returns
     /// [PotentialCoroCallResult::Suspended]. You can call [CoroState::resume] on it at any time to resume instantiation
+    #[cfg(feature = "async")]
     pub fn instantiate_coro(
         self,
         store: &mut Store,
@@ -80,11 +86,14 @@ impl Module {
 
 /// a corostate that results in [ModuleInstance] when finished
 #[derive(Debug)]
+#[cfg(feature = "async")]
 pub struct IncompleteModule(Option<HitTheFloor>);
 
 #[derive(Debug)]
+#[cfg(feature = "async")]
 struct HitTheFloor(ModuleInstance, SuspendedFunc);
 
+#[cfg(feature = "async")]
 impl CoroState<ModuleInstance, &mut Store> for IncompleteModule {
     fn resume(&mut self, ctx: &mut Store, arg: ResumeArgument) -> Result<crate::CoroStateResumeResult<ModuleInstance>> {
         let mut body: HitTheFloor = match self.0.take() {

@@ -34,10 +34,10 @@ struct MyUserData {
 struct MySuspendedState {
     base: i32,
 }
-impl<'a> CoroState<Vec<WasmValue>, FuncContext<'a>> for MySuspendedState {
+impl<'_> CoroState<Vec<WasmValue>, FuncContext<'_>> for MySuspendedState {
     fn resume(
         &mut self,
-        _: FuncContext<'a>,
+        _: FuncContext<'_>,
         arg: tinywasm::types::ResumeArgument,
     ) -> tinywasm::Result<tinywasm::CoroStateResumeResult<Vec<WasmValue>>> {
         let val = arg.expect("you din't send").downcast::<i32>().expect("you sent wrong");
