@@ -8,8 +8,8 @@ use log::{debug, error, info};
 use tinywasm::{Extern, Imports, ModuleInstance};
 use tinywasm_types::{ExternVal, MemoryType, ModuleInstanceAddr, TableType, ValType, WasmValue};
 use wasm_testsuite::data::TestFile;
-use wasm_testsuite::wast::{lexer::Lexer, parser::ParseBuffer, Wast};
 use wasm_testsuite::wast;
+use wasm_testsuite::wast::{lexer::Lexer, parser::ParseBuffer, Wast};
 
 #[derive(Default)]
 struct ModuleRegistry {
@@ -171,7 +171,7 @@ impl TestSuite {
         Ok(())
     }
 
-    pub fn run_file<'a>(&mut self, file: TestFile<'a>) -> Result<()> {
+    pub fn run_file(&mut self, file: TestFile<'_>) -> Result<()> {
         let test_group = self.test_group(file.name(), file.parent());
         let wast_raw = file.raw();
         let wast = file.wast()?;

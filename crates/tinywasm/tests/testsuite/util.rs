@@ -120,15 +120,15 @@ fn wastarg2tinywasmvalue(arg: wast::WastArg) -> Result<tinywasm_types::WasmValue
 fn wast_i128_to_i128(i: wast::core::V128Pattern) -> u128 {
     match i {
         wast::core::V128Pattern::F32x4(f) => {
-            f.iter().fold(0, |acc, &f| acc << 32 | nanpattern2tinywasmvalue(f).unwrap().as_f32().unwrap() as u128)
+            f.iter().fold(0, |acc, &f| (acc << 32) | nanpattern2tinywasmvalue(f).unwrap().as_f32().unwrap() as u128)
         }
         wast::core::V128Pattern::F64x2(f) => {
-            f.iter().fold(0, |acc, &f| acc << 64 | nanpattern2tinywasmvalue(f).unwrap().as_f64().unwrap() as u128)
+            f.iter().fold(0, |acc, &f| (acc << 64) | nanpattern2tinywasmvalue(f).unwrap().as_f64().unwrap() as u128)
         }
-        wast::core::V128Pattern::I16x8(f) => f.iter().fold(0, |acc, &f| acc << 16 | f as u128),
-        wast::core::V128Pattern::I32x4(f) => f.iter().fold(0, |acc, &f| acc << 32 | f as u128),
-        wast::core::V128Pattern::I64x2(f) => f.iter().fold(0, |acc, &f| acc << 64 | f as u128),
-        wast::core::V128Pattern::I8x16(f) => f.iter().fold(0, |acc, &f| acc << 8 | f as u128),
+        wast::core::V128Pattern::I16x8(f) => f.iter().fold(0, |acc, &f| (acc << 16) | f as u128),
+        wast::core::V128Pattern::I32x4(f) => f.iter().fold(0, |acc, &f| (acc << 32) | f as u128),
+        wast::core::V128Pattern::I64x2(f) => f.iter().fold(0, |acc, &f| (acc << 64) | f as u128),
+        wast::core::V128Pattern::I8x16(f) => f.iter().fold(0, |acc, &f| (acc << 8) | f as u128),
     }
 }
 

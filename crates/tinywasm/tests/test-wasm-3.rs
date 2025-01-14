@@ -4,7 +4,7 @@ use testsuite::TestSuite;
 use wasm_testsuite::data::{spec, SpecVersion};
 
 fn main() -> Result<()> {
-    if std::env::args().find(|x| x == "--enable").is_none() {
+    if !std::env::args().any(|x| &x == "--enable") {
         println!("Skipping wasm-3 tests, use --enable to run");
         return Ok(());
     }

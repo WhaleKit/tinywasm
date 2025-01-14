@@ -14,7 +14,8 @@ use tinywasm::{Extern, FuncContext, Imports, MemoryStringExt, Module, Store};
 /// ./examples/rust/build.sh
 /// ```
 ///
-/// This requires the `wasm32-unknown-unknown` target, `binaryen` and `wabt` to be installed.
+/// This requires the `wasm32-unknown-unknown` target, `binaryen`, and `wabt` to be installed:
+///
 /// `rustup target add wasm32-unknown-unknown`.
 /// <https://github.com/WebAssembly/wabt>
 /// <https://github.com/WebAssembly/binaryen>
